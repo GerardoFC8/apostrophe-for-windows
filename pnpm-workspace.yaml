@@ -1,0 +1,4 @@
+# pnpm 11 lee aquí qué dependencias pueden ejecutar build scripts.
+# esbuild necesita su build para que Vite funcione.
+allowBuilds:
+  esbuild: true
