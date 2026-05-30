@@ -5,7 +5,10 @@
 // M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado
 // (externalBin). La app ya no depende de que el usuario tenga pandoc instalado.
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
+use apostrophe_core::document::DocumentStore;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -81,12 +84,138 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
     apostrophe_core::stats::count(&text)
 }
 
+// --- M4: gestion de documento (abrir / guardar) ---
+// El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
+// state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
+// tauri-plugin-dialog. La WebView solo dispara los comandos y refleja el estado.
+
+type Doc = Mutex<DocumentStore>;
+
+/// Documento recien abierto que cruza al frontend.
+#[derive(serde::Serialize)]
+struct OpenedDoc {
+    path: String,
+    file_name: String,
+    content: String,
+}
+
+/// Estado para la titlebar: nombre de archivo + indicador de cambios sin guardar.
+#[derive(serde::Serialize)]
+struct DocStatus {
+    file_name: Option<String>,
+    dirty: bool,
+}
+
+/// Sincroniza el texto del editor con el store (se llama en el debounce) y devuelve
+/// el estado para el indicador de "modificado".
+#[tauri::command]
+fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
+    let mut store = doc.lock().unwrap();
+    store.set_content(text);
+    DocStatus {
+        file_name: store.file_name(),
+        dirty: store.is_dirty(),
+    }
+}
+
+/// Abre un .md con dialogo nativo + lectura de disco (std::fs). `None` si se cancela.
+#[tauri::command]
+fn open_document(
+    app: tauri::AppHandle,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<OpenedDoc>, String> {
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("Markdown", &["md", "markdown", "txt"])
+        .blocking_pick_file()
+    else {
+        return Ok(None); // el usuario cancelo el dialogo
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("ruta invalida: {e}"))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+
+    let mut store = doc.lock().unwrap();
+    store.open(path, content.clone());
+    Ok(Some(OpenedDoc {
+        path: store
+            .path()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        file_name: store.file_name().unwrap_or_default(),
+        content,
+    }))
+}
+
+/// Guarda: si el doc tiene path escribe ahi y marca limpio; si no, delega en
+/// "guardar como". `None` si se cancela el dialogo de guardar como.
+#[tauri::command]
+fn save_document(
+    app: tauri::AppHandle,
+    text: String,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<DocStatus>, String> {
+    let existing = doc.lock().unwrap().path().cloned();
+    let Some(path) = existing else {
+        return save_document_as(app, text, doc);
+    };
+    std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
+    let mut store = doc.lock().unwrap();
+    store.set_content(text);
+    store.mark_clean();
+    Ok(Some(DocStatus {
+        file_name: store.file_name(),
+        dirty: false,
+    }))
+}
+
+/// Guardar como: siempre dialogo nativo. Fija el nuevo path y marca limpio.
+#[tauri::command]
+fn save_document_as(
+    app: tauri::AppHandle,
+    text: String,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<DocStatus>, String> {
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("Markdown", &["md"])
+        .set_file_name("sin-titulo.md")
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("ruta invalida: {e}"))?;
+    std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
+    let mut store = doc.lock().unwrap();
+    store.set_content(text);
+    store.saved_as(path);
+    Ok(Some(DocStatus {
+        file_name: store.file_name(),
+        dirty: false,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![preview_markdown, count_stats])
+        .plugin(tauri_plugin_dialog::init())
+        .manage(Mutex::new(DocumentStore::new()))
+        .invoke_handler(tauri::generate_handler![
+            preview_markdown,
+            count_stats,
+            set_content,
+            open_document,
+            save_document,
+            save_document_as
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
