@@ -68,6 +68,8 @@ body {
   /* Antialiasing crisp estilo GNOME en WebView2/Chromium. */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Suaviza el cambio de tema (review M5): el chrome/editor no hace un flash brusco. */
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 /* Titlebar custom (M3, decorations:false): chrome faux-native Windows. El header y
@@ -170,6 +172,7 @@ body {
   width: 100%;
   height: 100%;
   background: var(--preview-bg);
+  transition: background-color 150ms ease;
 }
 
 .statusbar {
