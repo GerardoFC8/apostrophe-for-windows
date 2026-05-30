@@ -1,53 +1,76 @@
-// Spike de preview (ADR-0001, D1): valida el pipeline Rust -> pandoc -> WebView.
-// En el build de Windows, pandoc pasará a ser un sidecar (externalBin). Acá usamos el
-// pandoc del sistema para de-riskear el PIPELINE en WSL. OJO: en WSL el render es
-// WebKitGTK (vía WSLg), NO WebView2; el render real se re-valida en el build de Windows.
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::thread;
+// Adaptador primario (IPC) de la arquitectura hexagonal (ADR-0001): cruza la
+// frontera dominio<->presentacion. La logica vive en `apostrophe-core`; aca solo
+// se orquestan los procesos externos (pandoc) y se serializa el resultado.
+//
+// M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado
+// (externalBin). La app ya no depende de que el usuario tenga pandoc instalado.
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Convierte Markdown a HTML5 con pandoc, replicando (un subset de) el pipeline de
-/// preview de Apostrophe: `from=markdown`, `to=html5`, `--standalone --mathjax`.
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+
+/// Secuencia para nombrar temporales unicos por invocacion (evita choques entre
+/// previews concurrentes que dispara el debounce del frontend).
+static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Convierte Markdown a HTML5 con pandoc via SIDECAR bundleado (M2). Escribimos el
+/// markdown a un archivo temporal y le pasamos la RUTA a pandoc: evita tener que
+/// cerrar el stdin del sidecar (el plugin no expone un EOF limpio) y es robusto en
+/// documentos grandes. Los flags los arma el Converter port del dominio.
 ///
-/// TODO(ADR-0001): añadir `--css=<tema>`, `--metadata=base_path:<dir>`,
-/// `--lua-filter=relative_to_absolute.lua` y `--highlight-style=breezedark` (modo oscuro)
-/// cuando existan los assets de tema y el filtro Lua.
+/// TODO(ADR-0001): theme (`--css`), base_path, lua-filter y highlight-style cuando
+/// existan los assets de tema (M5).
 #[tauri::command]
-fn preview_markdown(text: String) -> Result<String, String> {
-    // Los args ya no estan hardcodeados: los construye el Converter port del dominio
-    // (apostrophe_core::convert). El spawn sigue aca (adaptador). M2: el binario
-    // pasara de `pandoc` del sistema a un sidecar bundleado.
-    let args = apostrophe_core::convert::preview_args(&apostrophe_core::convert::PreviewOptions::default());
-    let mut child = Command::new("pandoc")
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+async fn preview_markdown(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!(
+        "apostrophe-preview-{}-{}.md",
+        std::process::id(),
+        seq
+    ));
+    std::fs::write(&tmp, text.as_bytes())
+        .map_err(|e| format!("no se pudo escribir el temporal de preview: {e}"))?;
+
+    // Args: <ruta-temporal> seguido de los flags puros del dominio (Converter port).
+    let mut args = vec![tmp.to_string_lossy().into_owned()];
+    args.extend(apostrophe_core::convert::preview_args(
+        &apostrophe_core::convert::PreviewOptions::default(),
+    ));
+
+    let result = run_pandoc_sidecar(&app, args).await;
+    let _ = std::fs::remove_file(&tmp); // limpieza best-effort, pase lo que pase
+    result
+}
+
+/// Lanza el sidecar pandoc y junta su stdout. Aislado para mantener `preview_markdown`
+/// legible y garantizar el borrado del temporal aunque pandoc falle.
+async fn run_pandoc_sidecar(app: &tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
+    let sidecar = app
+        .shell()
+        .sidecar("pandoc")
+        .map_err(|e| format!("no se encontro el sidecar pandoc: {e}"))?;
+    let (mut rx, _child) = sidecar
+        .args(args)
         .spawn()
-        .map_err(|e| format!("no se pudo lanzar pandoc: {e} (¿instalado? `sudo apt install pandoc`)"))?;
+        .map_err(|e| format!("no se pudo lanzar el sidecar pandoc: {e}"))?;
 
-    // Escribimos el stdin en un hilo aparte para evitar un deadlock en documentos grandes:
-    // si pandoc llena el buffer de su stdout mientras nosotros seguimos escribiendo en su
-    // stdin, ambos procesos se bloquean esperándose. Leer stdout (wait_with_output) en el
-    // hilo principal mientras otro hilo alimenta stdin rompe ese ciclo.
-    let mut stdin = child.stdin.take().ok_or("no se pudo abrir el stdin de pandoc")?;
-    let writer = thread::spawn(move || {
-        let _ = stdin.write_all(text.as_bytes());
-        // `stdin` se cierra al hacer drop al salir del hilo -> EOF para pandoc.
-    });
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("error esperando a pandoc: {e}"))?;
-    let _ = writer.join();
-
-    if !output.status.success() {
-        return Err(format!(
-            "pandoc devolvió error: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let mut stdout: Vec<u8> = Vec::new();
+    let mut stderr = String::new();
+    let mut code: Option<i32> = None;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(chunk) => stdout.extend_from_slice(&chunk),
+            CommandEvent::Stderr(chunk) => stderr.push_str(&String::from_utf8_lossy(&chunk)),
+            CommandEvent::Error(err) => stderr.push_str(&err),
+            CommandEvent::Terminated(payload) => code = payload.code,
+            _ => {}
+        }
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+
+    if code != Some(0) {
+        return Err(format!("pandoc devolvio error (codigo {code:?}): {stderr}"));
+    }
+    String::from_utf8(stdout).map_err(|e| format!("la salida de pandoc no es UTF-8: {e}"))
 }
 
 /// Adaptador primario (IPC): expone el contador de stats del dominio. La logica
@@ -62,6 +85,7 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![preview_markdown, count_stats])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
