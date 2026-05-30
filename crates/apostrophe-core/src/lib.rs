@@ -10,5 +10,6 @@
 //!   politica de seguridad de preview, document store, spellcheck.
 
 pub mod convert;
+pub mod document;
 pub mod markup;
 pub mod stats;
