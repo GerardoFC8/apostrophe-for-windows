@@ -1,0 +1,13 @@
+# Normalizacion de fin de linea consistente entre WSL (LF) y la copia Windows.
+# El repo es AUTORITATIVO en LF: git almacena y hace checkout en LF en todas las
+# plataformas. Evita los "phantom diffs" de CRLF al hacer `git pull` desde
+# C:\dev\apostrophe (donde el git de Windows convertiria a CRLF por autocrlf).
+* text=auto eol=lf
+
+# Binarios: que git NUNCA toque su contenido.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.svg  binary
+*.woff2 binary
+*.exe  binary
