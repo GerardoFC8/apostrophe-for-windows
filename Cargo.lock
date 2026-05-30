@@ -68,6 +68,7 @@ dependencies = [
  "fancy-regex",
  "regex",
  "serde",
+ "spellbook",
 ]
 
 [[package]]
@@ -3255,6 +3256,16 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "spellbook"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009112b36a0967e851cc65805ac5905684c3e3ff2cd9af82ada329f0add55263"
+dependencies = [
+ "foldhash 0.2.0",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]

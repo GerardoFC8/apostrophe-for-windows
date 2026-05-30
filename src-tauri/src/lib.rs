@@ -5,9 +5,12 @@
 // M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado.
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
 use apostrophe_core::document::DocumentStore;
+use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
+use tauri::path::BaseDirectory;
+use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -289,6 +292,79 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
     result.map(|_| Some(out_str)) // pandoc escribe en --output; su stdout queda vacio
 }
 
+// --- M6: spellcheck ---
+// El diccionario es CARO de construir y BARATO de consultar: se carga UNA vez (en el
+// setup, off-thread) y se cachea en managed state. Arc para clonar barato bajo un lock
+// breve y soltar el lock antes del computo (no serializar otros comandos).
+
+/// Diccionario cargado (`None` hasta que el setup termina de cargarlo en background).
+pub struct SpellState(pub RwLock<Option<Arc<SpellbookDictionary>>>);
+
+/// Chequeo ortografico. Contrato: spellcheck(text, focus_mode) -> [{word, from, to,
+/// suggestions}] con char-offsets. focus_mode=true corto-circuita a [] (ADR-0001 D2).
+/// El chequeo de doc completo es CPU-bound -> spawn_blocking.
+#[tauri::command]
+async fn spellcheck(
+    text: String,
+    focus_mode: bool,
+    state: tauri::State<'_, SpellState>,
+) -> Result<Vec<Misspelling>, String> {
+    if focus_mode {
+        return Ok(Vec::new()); // ni lock ni computo
+    }
+    // Clonar el Arc bajo lock BREVE; soltarlo antes del computo pesado.
+    let dict = {
+        let guard = state.0.read().unwrap();
+        match guard.as_ref() {
+            Some(d) => Arc::clone(d),
+            None => return Ok(Vec::new()), // dict aun no cargado: spellcheck no critico
+        }
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        SpellChecker::check_text(dict.as_ref(), &text, false)
+    })
+    .await
+    .map_err(|e| format!("error en el chequeo ortografico: {e}"))
+}
+
+/// Lee un archivo de diccionario. Bundle: via BaseDirectory::Resource. Dev: fallback
+/// al dir del crate (donde fetch-dictionaries.ps1 deja los archivos), porque en
+/// `tauri dev` el resolver de Resource puede no encontrar los resources.
+fn read_dict_file(app: &tauri::AppHandle, name: &str) -> Result<String, String> {
+    if let Ok(p) = app
+        .path()
+        .resolve(format!("dictionaries/{name}"), BaseDirectory::Resource)
+    {
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            return Ok(s);
+        }
+    }
+    let dev_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/dictionaries/");
+    std::fs::read_to_string(format!("{dev_dir}{name}")).map_err(|e| format!("{name}: {e}"))
+}
+
+/// Carga el diccionario es en background (off-thread, es caro) y lo guarda en
+/// SpellState. Si falla (no provisionado), el spellcheck degrada graciosamente ([]).
+fn load_dictionary(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let h = handle.clone();
+        let loaded = tauri::async_runtime::spawn_blocking(move || -> Result<SpellbookDictionary, String> {
+            let aff = read_dict_file(&h, "es.aff")?;
+            let dic = read_dict_file(&h, "es.dic")?;
+            SpellbookDictionary::load(&aff, &dic)
+        })
+        .await;
+        match loaded {
+            Ok(Ok(dict)) => {
+                *handle.state::<SpellState>().0.write().unwrap() = Some(Arc::new(dict));
+            }
+            Ok(Err(e)) => eprintln!("spellcheck: no se pudo cargar el diccionario es: {e}"),
+            Err(e) => eprintln!("spellcheck: error de join cargando el diccionario: {e}"),
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -296,6 +372,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(DocumentStore::new()))
+        .manage(SpellState(RwLock::new(None)))
+        .setup(|app| {
+            load_dictionary(app.handle()); // carga el diccionario es en background
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             preview_markdown,
             count_stats,
@@ -303,7 +384,8 @@ pub fn run() {
             open_document,
             save_document,
             save_document_as,
-            export_document
+            export_document,
+            spellcheck
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

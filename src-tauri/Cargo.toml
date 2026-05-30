@@ -20,7 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # Nucleo de dominio (hexagonal): la logica vive aca; src-tauri solo adapta (IPC).
 # Activa el feature `serde` para que Stats/ReadTime crucen la frontera como JSON.
-apostrophe-core = { path = "../crates/apostrophe-core", features = ["serde"] }
+apostrophe-core = { path = "../crates/apostrophe-core", features = ["serde", "spellbook-backend"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # M2: pandoc como sidecar (externalBin) en vez del binario del sistema.

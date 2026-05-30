@@ -12,4 +12,5 @@
 pub mod convert;
 pub mod document;
 pub mod markup;
+pub mod spellcheck;
 pub mod stats;

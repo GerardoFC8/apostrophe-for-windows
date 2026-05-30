@@ -17,9 +17,14 @@ fancy-regex = "0.14"
 # serde OPCIONAL: el dominio es puro por defecto (no lo arrastra). Solo el adaptador
 # (src-tauri) activa el feature `serde` para serializar Stats/ReadTime al cruzar el IPC.
 serde = { version = "1", features = ["derive"], optional = true }
+# spellbook OPCIONAL (M6): motor Hunspell puro-Rust (helix-editor), detras del feature
+# `spellbook-backend`. El dominio depende del trait `Dictionary`, no de spellbook (ADR-0001):
+# asi el TDD de la logica de spans corre sin parsear .aff/.dic. Pineado (alpha). MPL-2.0.
+spellbook = { version = "=0.4.1", optional = true }
 
 [features]
 serde = ["dep:serde"]
+spellbook-backend = ["dep:spellbook"]
 
 [dev-dependencies]
 # Para los tests del dominio. Candidato cuando haya casos parametrizados: rstest.

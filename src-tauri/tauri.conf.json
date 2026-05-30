@@ -27,6 +27,7 @@
     "active": true,
     "targets": "all",
     "externalBin": ["binaries/pandoc"],
+    "resources": ["dictionaries/es.aff", "dictionaries/es.dic", "dictionaries/es.license.txt"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
