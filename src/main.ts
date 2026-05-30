@@ -1,3 +1,9 @@
+// Fuentes bundleadas (offline) que clonan el look del GNOME actual (Adwaita):
+// Inter (≈ Adwaita Sans) para el chrome, JetBrains Mono para el editor. Se
+// empaquetan en el bundle via Vite — NO dependen de lo que tenga instalado Windows.
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
+
 import { invoke } from "@tauri-apps/api/core";
 
 // Spike (ADR-0001): editor (textarea) -> comandos Rust -> presentacion.

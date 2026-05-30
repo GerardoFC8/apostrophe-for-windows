@@ -16,7 +16,11 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Inter Variable (≈ Adwaita Sans del GNOME actual). Fallbacks por si el bundle falla. */
+  font-family: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Antialiasing crisp estilo GNOME en WebView2/Chromium. */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .topbar {
@@ -47,7 +51,7 @@ body {
   border: 0;
   resize: none;
   padding: 1rem;
-  font-family: "Fira Mono", ui-monospace, "Cascadia Code", monospace;
+  font-family: "JetBrains Mono Variable", "Cascadia Code", ui-monospace, monospace;
   font-size: 14px;
   line-height: 1.6;
   outline: none;
