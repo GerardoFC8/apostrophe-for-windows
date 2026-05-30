@@ -14,8 +14,12 @@ use std::thread;
 /// cuando existan los assets de tema y el filtro Lua.
 #[tauri::command]
 fn preview_markdown(text: String) -> Result<String, String> {
+    // Los args ya no estan hardcodeados: los construye el Converter port del dominio
+    // (apostrophe_core::convert). El spawn sigue aca (adaptador). M2: el binario
+    // pasara de `pandoc` del sistema a un sidecar bundleado.
+    let args = apostrophe_core::convert::preview_args(&apostrophe_core::convert::PreviewOptions::default());
     let mut child = Command::new("pandoc")
-        .args(["--from", "markdown", "--to", "html5", "--standalone", "--mathjax"])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

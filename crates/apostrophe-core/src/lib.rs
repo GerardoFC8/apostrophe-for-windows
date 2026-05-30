@@ -9,5 +9,6 @@
 //! - (futuro) parser de markup (~22 regex), orquestador de conversion,
 //!   politica de seguridad de preview, document store, spellcheck.
 
+pub mod convert;
 pub mod markup;
 pub mod stats;
