@@ -9,9 +9,26 @@
   </head>
 
   <body>
-    <header class="topbar">
-      <span class="brand">Apostrophe · spike: preview + stats</span>
-      <span id="status" class="status">—</span>
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="brand" data-tauri-drag-region>Apostrophe</span>
+      <span id="status" class="status" data-tauri-drag-region>—</span>
+      <div class="window-controls">
+        <button class="win-btn" id="win-min" type="button" aria-label="Minimizar" title="Minimizar">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0 5 H10" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn" id="win-max" type="button" aria-label="Maximizar" title="Maximizar">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn win-close" id="win-close" type="button" aria-label="Cerrar" title="Cerrar">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+      </div>
     </header>
     <main class="split">
       <div id="editor" class="editor"></div>

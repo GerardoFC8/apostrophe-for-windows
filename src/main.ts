@@ -5,6 +5,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { EditorView, keymap, drawSelection, highlightActiveLine } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
@@ -41,6 +42,13 @@ const statChars = document.querySelector<HTMLElement>("#stat-chars")!;
 const statSentences = document.querySelector<HTMLElement>("#stat-sentences")!;
 const statParagraphs = document.querySelector<HTMLElement>("#stat-paragraphs")!;
 const statReadTime = document.querySelector<HTMLElement>("#stat-readtime")!;
+
+// Chrome nativo (M3): titlebar custom. `decorations: false` (tauri.conf.json) saca
+// la barra Win32; estos botones manejan la ventana via la window API de Tauri.
+const appWindow = getCurrentWindow();
+document.querySelector("#win-min")?.addEventListener("click", () => void appWindow.minimize());
+document.querySelector("#win-max")?.addEventListener("click", () => void appWindow.toggleMaximize());
+document.querySelector("#win-close")?.addEventListener("click", () => void appWindow.close());
 
 // Tema del editor (Adwaita-ish): hereda los colores de la pagina via CSS vars
 // (light/dark en styles.css), tipografia JetBrains Mono. El acento es el azul Adwaita.

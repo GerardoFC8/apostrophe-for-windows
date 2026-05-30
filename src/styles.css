@@ -36,13 +36,17 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-.topbar {
+/* Titlebar custom (M3, decorations:false): chrome faux-native Windows. El header y
+   los textos son drag region (data-tauri-drag-region); los botones NO, para que el
+   click registre. Sin padding a la derecha: los botones caption van flush al borde. */
+.titlebar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.4rem 0.8rem;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  height: 38px;
+  padding-left: 0.8rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
   font-size: 0.85rem;
+  user-select: none;
 }
 
 .brand {
@@ -50,7 +54,38 @@ body {
 }
 
 .status {
-  opacity: 0.7;
+  opacity: 0.65;
+  margin-left: 0.8rem;
+}
+
+.window-controls {
+  margin-left: auto; /* empuja los botones al borde derecho */
+  display: flex;
+  height: 100%;
+}
+
+.win-btn {
+  width: 46px; /* ancho caption estándar de Win11 */
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+
+.win-btn svg {
+  opacity: 0.85;
+}
+
+.win-btn:hover {
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.win-close:hover {
+  background: #c42b1c; /* rojo close de Windows */
+  color: #fff;
 }
 
 .split {
