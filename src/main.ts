@@ -10,16 +10,15 @@ import { EditorView, keymap, drawSelection, highlightActiveLine } from "@codemir
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
-// M3: el editor pasa de <textarea> a CodeMirror 6 (target del ADR-0001). La logica
-// sigue en Rust (dominio); la WebView solo PRESENTA. La frontera IPC es gruesa y con
-// debounce: NO se invoca por tecla, sino tras una pausa de escritura.
+// M3: editor CodeMirror 6 (target del ADR-0001). M4: abrir/guardar .md con dialogos
+// nativos; el estado (path/dirty) vive en el DocumentStore de Rust. La logica esta en
+// Rust; la WebView solo PRESENTA. La frontera IPC es gruesa y con debounce.
 //
-// ADR-0001 D1: el highlighting (negritas/italicas dentro del editor) NO se hace con
-// la gramatica Lezer de CodeMirror — vendra del nucleo Rust como spans (post-MVP).
-// Por eso aca NO se incluye @codemirror/lang-markdown ni syntaxHighlighting.
+// ADR-0001 D1: el highlighting NO se hace con la gramatica Lezer de CodeMirror —
+// vendra del nucleo Rust como spans (post-MVP). Por eso NO hay @codemirror/lang-markdown.
 const DEBOUNCE_MS = 250;
 
-// --- Contrato del IPC con el nucleo (apostrophe_core::stats) ---
+// --- Contratos del IPC con el nucleo ---
 interface ReadTime {
   hours: number;
   minutes: number;
@@ -33,10 +32,21 @@ interface Stats {
   // snake_case: serde serializa con el nombre del campo de Rust (read_time).
   read_time: ReadTime;
 }
+// M4: documento abierto / estado del documento (titlebar).
+interface OpenedDoc {
+  path: string;
+  file_name: string;
+  content: string;
+}
+interface DocStatus {
+  file_name: string | null;
+  dirty: boolean;
+}
 
 const editorParent = document.querySelector<HTMLElement>("#editor")!;
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 const status = document.querySelector<HTMLElement>("#status")!;
+const docName = document.querySelector<HTMLElement>("#doc-name")!;
 const statWords = document.querySelector<HTMLElement>("#stat-words")!;
 const statChars = document.querySelector<HTMLElement>("#stat-chars")!;
 const statSentences = document.querySelector<HTMLElement>("#stat-sentences")!;
@@ -89,6 +99,18 @@ function getText(): string {
   return view.state.doc.toString();
 }
 
+// Reemplaza TODO el contenido del editor (al abrir un archivo). Dispara el
+// updateListener -> debounce, que recalcula preview/stats y sincroniza el store.
+function setEditorText(text: string): void {
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+}
+
+// Titlebar: nombre del archivo (o "Sin título") + indicador ● de cambios sin guardar.
+function updateTitlebar(fileName: string | null, dirty: boolean): void {
+  const name = fileName ?? "Sin título";
+  docName.textContent = dirty ? `${name} ●` : name;
+}
+
 async function render(): Promise<void> {
   status.textContent = "convirtiendo…";
   try {
@@ -114,11 +136,60 @@ async function updateStats(): Promise<void> {
   }
 }
 
+// M4: sincroniza el contenido con el DocumentStore de Rust (calcula dirty) en el
+// debounce. El indicador ● no es critico, por eso si falla se ignora en silencio.
+async function syncDoc(): Promise<void> {
+  try {
+    const st = await invoke<DocStatus>("set_content", { text: getText() });
+    updateTitlebar(st.file_name, st.dirty);
+  } catch {
+    /* no critico */
+  }
+}
+
+// M4: abrir un .md (dialogo nativo). Carga el contenido en el editor.
+async function openDoc(): Promise<void> {
+  try {
+    const opened = await invoke<OpenedDoc | null>("open_document");
+    if (!opened) return; // cancelado
+    setEditorText(opened.content);
+    updateTitlebar(opened.file_name, false);
+    status.textContent = "abierto";
+  } catch (err) {
+    status.textContent = `error al abrir: ${String(err)}`;
+  }
+}
+
+// M4: guardar (escribe al path actual, o abre "guardar como" si es nuevo).
+async function saveDoc(): Promise<void> {
+  try {
+    const st = await invoke<DocStatus | null>("save_document", { text: getText() });
+    if (!st) return; // cancelado
+    updateTitlebar(st.file_name, st.dirty);
+    status.textContent = "guardado";
+  } catch (err) {
+    status.textContent = `error al guardar: ${String(err)}`;
+  }
+}
+
+// M4: guardar como (siempre dialogo).
+async function saveDocAs(): Promise<void> {
+  try {
+    const st = await invoke<DocStatus | null>("save_document_as", { text: getText() });
+    if (!st) return; // cancelado
+    updateTitlebar(st.file_name, st.dirty);
+    status.textContent = "guardado";
+  } catch (err) {
+    status.textContent = `error al guardar: ${String(err)}`;
+  }
+}
+
 function scheduleUpdate(): void {
   if (timer !== undefined) clearTimeout(timer);
   timer = window.setTimeout(() => {
     void render();
     void updateStats();
+    void syncDoc();
   }, DEBOUNCE_MS);
 }
 
@@ -126,6 +197,8 @@ const SAMPLE = [
   "# Apostrophe en Windows",
   "",
   "Editor **CodeMirror 6** nativo + pipeline **Rust → pandoc (sidecar) → WebView**.",
+  "",
+  "Atajos: `Ctrl+O` abrir · `Ctrl+S` guardar · `Ctrl+Shift+S` guardar como.",
   "",
   "- ítem de lista",
   "- soporte de `código` inline",
@@ -150,6 +223,12 @@ const view = new EditorView({
     highlightActiveLine(),
     EditorView.lineWrapping,
     closeBrackets(),
+    // M4: atajos de archivo (mayor precedencia, van primeros). Mod = Ctrl/Cmd.
+    keymap.of([
+      { key: "Mod-o", run: () => { void openDoc(); return true; } },
+      { key: "Mod-s", run: () => { void saveDoc(); return true; } },
+      { key: "Mod-Shift-s", run: () => { void saveDocAs(); return true; } },
+    ]),
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
     editorTheme,
     EditorView.updateListener.of((update) => {

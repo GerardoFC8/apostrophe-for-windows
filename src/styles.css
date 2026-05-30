@@ -53,13 +53,18 @@ body {
   font-weight: 600;
 }
 
+.doc-name {
+  margin-left: 0.6rem;
+  opacity: 0.85;
+}
+
 .status {
   opacity: 0.65;
-  margin-left: 0.8rem;
+  margin-left: auto; /* empuja status + controles al borde derecho */
+  margin-right: 0.6rem;
 }
 
 .window-controls {
-  margin-left: auto; /* empuja los botones al borde derecho */
   display: flex;
   height: 100%;
 }
