@@ -1,0 +1,15 @@
+[package]
+name = "apostrophe-core"
+version = "0.1.0"
+edition = "2021"
+description = "Nucleo de dominio puro de Apostrophe (hexagonal, ADR-0001): stats, parser de markup, conversion. Sin dependencias de UI/Tauri."
+authors = ["Gerardo Franco"]
+
+[dependencies]
+# `regex` (crate de BurntSushi, tiempo lineal garantizado) para WORDS y SENTENCES,
+# que NO usan lookaround y portan directo. CHARACTERS y PARAGRAPHS se implementan
+# imperativamente (usan lookahead que este crate no soporta; ver docs/upstream-reference).
+regex = "1"
+
+[dev-dependencies]
+# Para los tests del dominio. Candidato cuando haya casos parametrizados: rstest.

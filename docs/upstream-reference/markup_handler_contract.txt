@@ -1,0 +1,602 @@
+# ============================================================================
+# CONSUMER: apostrophe/text_view_markup_handler.py  (rama main, 421 lineas)
+# https://gitlab.gnome.org/World/apostrophe/-/raw/main/apostrophe/text_view_markup_handler.py
+# Este es el archivo que CONSUME los regex y emite las decoraciones (Pango tags).
+# ============================================================================
+
+import regex as re
+from multiprocessing import Pipe, Process
+
+import gi
+from gi.repository import GLib, Gtk, Pango
+
+from apostrophe import helpers, markup_regex
+from apostrophe.markup_regex import (BLOCK_QUOTE, BOLD, BOLD_ITALIC, CODE,
+                                     HEADER, HEADER_UNDER, HORIZONTAL_RULE,
+                                     IMAGE, ITALIC_ASTERISK, ITALIC_UNDERSCORE,
+                                     LINK, LINK_ALT, LIST, MATH, ORDERED_LIST,
+                                     STRIKETHROUGH, TABLE)
+
+gi.require_version('Gtk', '4.0')
+
+
+class MarkupHandler:
+    TAG_NAME_ITALIC = 'italic'
+    TAG_NAME_BOLD = 'bold'
+    TAG_NAME_BOLD_ITALIC = 'bold_italic'
+    TAG_NAME_STRIKETHROUGH = 'strikethrough'
+    TAG_NAME_CENTER = 'center'
+    TAG_NAME_WRAP_NONE = 'wrap_none'
+    TAG_NAME_PLAIN_TEXT = 'plain_text'
+    TAG_NAME_GRAY_TEXT = 'gray_text'
+    TAG_NAME_LINK_COLOR_TEXT = 'link_color_text'
+    TAG_NAME_CODE_TEXT = 'code_text'
+    TAG_NAME_CODE_BLOCK = 'code_block'
+    TAG_NAME_UNFOCUSED_TEXT = 'unfocused_text'
+    TAG_NAME_MARGIN_INDENT = 'margin_indent'
+
+    def __init__(self, textview):
+        self.textview = textview
+        self.text_buffer = self.textview.get_buffer()
+        self.marked_up_text = None
+
+        # Tags.
+        buffer = self.text_buffer
+
+        self.tag_italic = buffer.create_tag(self.TAG_NAME_ITALIC,
+                                            weight=Pango.Weight.NORMAL,
+                                            style=Pango.Style.ITALIC)
+        self.tag_bold = buffer.create_tag(self.TAG_NAME_BOLD,
+                                          weight=Pango.Weight.BOLD,
+                                          style=Pango.Style.NORMAL)
+        self.tag_bold_italic = buffer.create_tag(self.TAG_NAME_BOLD_ITALIC,
+                                                 weight=Pango.Weight.BOLD,
+                                                 style=Pango.Style.ITALIC)
+        self.tag_strikethrough = buffer.create_tag(self.TAG_NAME_STRIKETHROUGH,
+                                                   strikethrough=True)
+        self.tag_center = buffer.create_tag(self.TAG_NAME_CENTER,
+                                            justification=Gtk.Justification.CENTER)
+        self.tag_wrap_none = buffer.create_tag(self.TAG_NAME_WRAP_NONE,
+                                               wrap_mode=Gtk.WrapMode.NONE,
+                                               pixels_above_lines=0,
+                                               pixels_below_lines=0)
+        self.tag_plain_text = buffer.create_tag(self.TAG_NAME_PLAIN_TEXT,
+                                                weight=Pango.Weight.NORMAL,
+                                                style=Pango.Style.NORMAL,
+                                                strikethrough=False,
+                                                justification=Gtk.Justification.LEFT)
+        self.tag_gray_text = buffer.create_tag(self.TAG_NAME_GRAY_TEXT,
+                                               foreground='gray',
+                                               weight=Pango.Weight.NORMAL,
+                                               style=Pango.Style.NORMAL)
+        self.tag_link_color_text = buffer.create_tag(self.TAG_NAME_LINK_COLOR_TEXT,
+                                               foreground='lightblue',
+                                               weight=Pango.Weight.NORMAL,
+                                               style=Pango.Style.ITALIC)
+        self.tag_code_text = buffer.create_tag(self.TAG_NAME_CODE_TEXT,
+                                               weight=Pango.Weight.NORMAL,
+                                               style=Pango.Style.NORMAL,
+                                               strikethrough=False)
+        self.tag_code_block = buffer.create_tag(self.TAG_NAME_CODE_BLOCK,
+                                                weight=Pango.Weight.NORMAL,
+                                                style=Pango.Style.NORMAL,
+                                                strikethrough=False,
+                                                indent=self.get_margin_indent(0, 1)[1])
+
+        # MAPA tag_name -> factory de Pango tag (algunos toman args, p.ej. margin_indent)
+        self.tags_markup = {
+            self.TAG_NAME_ITALIC: lambda args: self.tag_italic,
+            self.TAG_NAME_BOLD: lambda args: self.tag_bold,
+            self.TAG_NAME_BOLD_ITALIC: lambda args: self.tag_bold_italic,
+            self.TAG_NAME_STRIKETHROUGH: lambda args: self.tag_strikethrough,
+            self.TAG_NAME_CENTER: lambda args: self.tag_center,
+            self.TAG_NAME_WRAP_NONE: lambda args: self.tag_wrap_none,
+            self.TAG_NAME_PLAIN_TEXT: lambda args: self.tag_plain_text,
+            self.TAG_NAME_GRAY_TEXT: lambda args: self.tag_gray_text,
+            self.TAG_NAME_LINK_COLOR_TEXT: lambda args: self.tag_link_color_text,
+            self.TAG_NAME_CODE_TEXT: lambda args: self.tag_code_text,
+            self.TAG_NAME_CODE_BLOCK: lambda args: self.tag_code_block,
+            self.TAG_NAME_MARGIN_INDENT: lambda args: self.get_margin_indent_tag(*args)
+        }
+
+        # Focus mode.
+        self.tag_unfocused_text = buffer.create_tag(self.TAG_NAME_UNFOCUSED_TEXT,
+                                                    foreground='gray',
+                                                    weight=Pango.Weight.NORMAL,
+                                                    style=Pango.Style.NORMAL)
+
+        # Margin and indents.
+        self.tags_margins_indents = {}
+        self.baseline_margin = 0
+        self.char_width = 0
+        self.update_margins_indents()
+
+        # Style.
+        self.on_style_updated()
+
+        # ---- ARRANQUE DEL WORKER: Pipe + Process + GLib watch sobre el fd ----
+        self.parsing = False
+        self.apply_pending = False
+        self.parent_conn, child_conn = Pipe()
+        Process(target=self.parse, args=(child_conn,), daemon=True).start()
+        GLib.io_add_watch(
+            self.parent_conn.fileno(),
+            GLib.PRIORITY_DEFAULT,
+            GLib.IO_IN,
+            self.on_parsed)
+
+    def apply(self):
+        """Applies markup, parsing it in a worker process if the text has changed.
+        In case parsing is already running, it will re-apply once it finishes."""
+        if not self.parsing:
+            self.parsing = True
+            self.apply_pending = False
+            text = self.text_buffer.get_slice(
+                self.text_buffer.get_start_iter(),
+                self.text_buffer.get_end_iter(),
+                False)
+            if text != self.marked_up_text:
+                self.parent_conn.send(text)   # envia texto al worker por el Pipe
+            else:
+                self.do_apply(text)
+        else:
+            self.apply_pending = True
+
+    # ===== PRODUCTOR (corre en el Process hijo): consume regex, emite spans =====
+    def parse(self, child_conn):
+        """Parses markup in a worker process."""
+        while True:
+            while True:
+                try:
+                    text = child_conn.recv()
+                    if not child_conn.poll():
+                        break
+                except EOFError:
+                    child_conn.close()
+                    return
+
+            # List of tuples in the form (tag_name, tag_args, tag_start, tag_end).
+            result = []
+
+            # Find "```" code block tag (offset + colorize paragraph).
+            code_blocks = []
+            matches = re.finditer(markup_regex.CODE_BLOCK, text)
+            for match in matches:
+                start, end = match.start("block"), match.end("block")
+                result.append((
+                    self.TAG_NAME_CODE_BLOCK, (),
+                    start, end))
+                code_blocks.append((start, end))
+
+            # helper functions to test if a range is inside code blocks.
+            inside_code_blocks = lambda start, end: any(True for (s, e) in code_blocks if s < start < e or s < end < e)
+            match_inside_code_blocks = lambda m: inside_code_blocks(m.start(), m.end())
+
+            # Inline spans: cada regex mapea a un tag_name. El span es (start, end)
+            # del match COMPLETO (incluye delimitadores).
+            regexps = (
+                (ITALIC_ASTERISK, self.TAG_NAME_ITALIC),
+                (ITALIC_UNDERSCORE, self.TAG_NAME_ITALIC),
+                (BOLD, self.TAG_NAME_BOLD),
+                (BOLD_ITALIC, self.TAG_NAME_BOLD_ITALIC),
+                (STRIKETHROUGH, self.TAG_NAME_STRIKETHROUGH),
+                (CODE, self.TAG_NAME_CODE_TEXT),
+                (MATH, self.TAG_NAME_CODE_TEXT),
+                (TABLE, self.TAG_NAME_WRAP_NONE)
+            )
+            for regexp, tag_name in regexps:
+                matches = re.finditer(regexp, text)
+                for match in matches:
+                    if match_inside_code_blocks(match):
+                        continue
+                    result.append((tag_name, (), match.start(), match.end()))
+
+            # LINK / IMAGE: griseado DOBLE span -> [start..start("text")] y
+            # [end("text")..end]. Es decir, decora SOLO la sintaxis ([], (), !),
+            # dejando el texto/url visible en color normal.
+            regexps = (
+                (LINK, self.TAG_NAME_LINK_COLOR_TEXT),
+                (IMAGE, self.TAG_NAME_GRAY_TEXT)
+            )
+            for regexp, tag_name in regexps:
+                matches = re.finditer(regexp, text)
+                for match in matches:
+                    if match_inside_code_blocks(match):
+                        continue
+                    result.append(
+                        (tag_name, (), match.start(), match.start("text")))
+                    result.append(
+                        (tag_name, (), match.end("text"), match.end()))
+
+            # Find "<url>" links (gray out). Solo el grupo "text".
+            matches = re.finditer(LINK_ALT, text)
+            for match in matches:
+                if match_inside_code_blocks(match):
+                    continue
+                result.append((
+                    self.TAG_NAME_GRAY_TEXT,
+                    (), match.start("text"),
+                    match.end("text")))
+
+            # Find "---" horizontal rule (center). Solo grupo "symbols".
+            matches = re.finditer(HORIZONTAL_RULE, text)
+            for match in matches:
+                if match_inside_code_blocks(match):
+                    continue
+                result.append((
+                    self.TAG_NAME_CENTER,
+                    (), match.start("symbols"),
+                    match.end("symbols")))
+
+            # Find "> blockquote" (offset). margin_indent con args (2, -2).
+            matches = re.finditer(BLOCK_QUOTE, text)
+            for match in matches:
+                if match_inside_code_blocks(match):
+                    continue
+                result.append((self.TAG_NAME_MARGIN_INDENT,
+                               (2, -2), match.start(), match.end()))
+
+            # Find "# Header" (offset+bold). margin depende del nivel (n de #).
+            matches = re.finditer(HEADER, text)
+            for match in matches:
+                if match_inside_code_blocks(match):
+                    continue
+                margin = -len(match.group("level")) - 1
+                result.append((
+                    self.TAG_NAME_MARGIN_INDENT, (margin, 0),
+                    match.start(), match.end()))
+                result.append(
+                    (self.TAG_NAME_BOLD, (), match.start(), match.end()))
+
+            # Find "=======" header underline (bold). Excluye YAML frontmatter.
+            matches = re.finditer(HEADER_UNDER, text)
+            for match in matches:
+                if match_inside_code_blocks(match):
+                    continue
+                if frontmatter := re.search(markup_regex.FRONTMATTER, text):
+                    if match.start() <= frontmatter.end():
+                        continue
+                result.append(
+                    (self.TAG_NAME_BOLD, (), match.start(), match.end()))
+
+            # Send parsed data back. CONTRATO de salida: (text, result)
+            # donde result = list[(tag_name, tag_args, start_offset, end_offset)]
+            child_conn.send((text, result))
+
+    # ===== CONSUMIDOR EN EL MAIN LOOP: GLib watch dispara on_parsed =====
+    def on_parsed(self, _source, _condition):
+        """Reads the parsing result from the pipe and triggers any pending apply."""
+        if self.apply_pending:
+            self.parsing = False
+            self.apply()
+        try:
+            if self.parent_conn.poll():
+                self.do_apply(*self.parent_conn.recv())   # desempaqueta (text, result)
+            return True
+        except EOFError:
+            return False
+        finally:
+            self.parsing = False
+
+    # ===== APLICACION DE TAGS sobre el GtkTextBuffer (main thread) =====
+    def do_apply(self, original_text, result=[]):
+        """Applies the result of parsing if the current text matches the original text."""
+        buffer = self.text_buffer
+        start = buffer.get_start_iter()
+        end = buffer.get_end_iter()
+        text = self.text_buffer.get_slice(start, end, False)
+
+        if text == original_text and text != self.marked_up_text:
+            buffer.remove_tag(self.tag_italic, start, end)
+            buffer.remove_tag(self.tag_bold, start, end)
+            buffer.remove_tag(self.tag_bold_italic, start, end)
+            buffer.remove_tag(self.tag_strikethrough, start, end)
+            buffer.remove_tag(self.tag_center, start, end)
+            buffer.remove_tag(self.tag_plain_text, start, end)
+            buffer.remove_tag(self.tag_gray_text, start, end)
+            buffer.remove_tag(self.tag_code_text, start, end)
+            buffer.remove_tag(self.tag_code_block, start, end)
+            buffer.remove_tag(self.tag_wrap_none, start, end)
+            for tag in self.tags_margins_indents.values():
+                buffer.remove_tag(tag, start, end)
+
+            # AQUI se convierte cada span (offsets de caracter) -> GtkTextIter
+            # y se aplica el Pango tag resuelto por self.tags_markup[tag_name](tag_args)
+            for tag_name, tag_args, tag_start, tag_end in result:
+                buffer.apply_tag(
+                    self.tags_markup[tag_name](tag_args),
+                    buffer.get_iter_at_offset(tag_start),
+                    buffer.get_iter_at_offset(tag_end))
+
+        # Focus mode: grisea fuera de la oracion actual.
+        buffer.remove_tag(self.tag_unfocused_text, start, end)
+        if self.textview.focus_mode:
+            start_sentence, end_sentence = buffer.get_current_sentence_bounds()
+            buffer.apply_tag(self.tag_unfocused_text, start, start_sentence)
+            buffer.apply_tag(self.tag_unfocused_text, end_sentence, end)
+
+    def get_margin_indent_tag(self, margin_level, indent_level):
+        level = (margin_level, indent_level)
+        if level not in self.tags_margins_indents:
+            margin, indent = self.get_margin_indent(margin_level, indent_level)
+            tag = self.text_buffer.create_tag(
+                "margin_indent_{}_{}".format(margin_level, indent_level),
+                left_margin=margin, indent=indent)
+            self.tags_margins_indents[level] = tag
+            return tag
+        else:
+            return self.tags_margins_indents[level]
+
+    def get_margin_indent(self, margin_level, indent_level,
+                          baseline_margin=None, char_width=None):
+        if baseline_margin is None:
+            baseline_margin = self.textview.get_left_margin()
+        if char_width is None:
+            char_width = helpers.get_char_width(self.textview)
+        margin = max(baseline_margin + char_width * margin_level, 0)
+        indent = char_width * indent_level
+        return margin, indent
+
+    def stop(self, *_):
+        self.parent_conn.close()
+
+
+# ============================================================================
+# PRODUCTOR DE PATRONES: apostrophe/markup_regex.py  (rama main)
+# https://gitlab.gnome.org/World/apostrophe/-/raw/main/apostrophe/markup_regex.py
+# OJO: usa el modulo `regex` (no `re` stdlib) -> soporta \p{L}, \p{N}, atomic (?>...)
+# Cada patron y su flag, LITERAL:
+# ============================================================================
+
+import regex as re
+
+ITALIC_ASTERISK = re.compile(
+    r"""
+    (?<![\\*])      # Can't start with \ or an extra *
+    \*              # Start with *
+    (?P<text>
+        (?:
+            [^\s*\\]
+        |
+            [^\s*]
+            .*?
+            [^\\*]
+        )
+    )
+    \*              # End with *
+    (?!\*)
+    """,
+    flags=re.VERBOSE
+    )
+ITALIC_UNDERSCORE = re.compile(
+    r"""
+    (?<![\\_\p{L}\p{N}])    # Can't be preceded by \, extra _ or alphanumeric
+    _
+    (?P<text>
+        (?:
+            [^\s_\\]
+        |
+            [^\s_]
+            .*?
+            [^\\_]
+        )
+    )
+    _
+    (?![\p{L}\p{N}_])
+    """,
+    flags=re.VERBOSE
+    )
+BOLD = re.compile(
+    r"""
+    (?<!\\)
+    (\*\*|__)       # Delimiter start (** or __)
+    (?P<text>
+        (?:
+            [^\s_*\\]
+        |
+            [^\s*]
+            .*?
+            [^\\]
+        )
+    )
+    \1              # Delimiter (matches opening)
+    """,
+    flags=re.VERBOSE
+    )
+BOLD_ITALIC = re.compile(
+    r"""
+    (?<!\\)
+    ((\*\*|__)([*_])|([*_])(\*\*|__))
+    (?P<text>
+        (?:
+            [^\s_*\\]
+        |
+            [^\s*]
+            .*?
+            [^\\]
+        )
+    )
+    (?:\5\4|\3\2)
+    """,
+    flags=re.VERBOSE)
+STRIKETHROUGH = re.compile(
+    r"""
+    (?<!\\)
+    ~~
+    (?P<text>
+        (?:
+            [^\s_*\\]
+        |
+            [^\s*]
+            .*?
+            [^\s\\]
+        )
+    )
+    ~~
+    """,
+    flags=re.VERBOSE)
+CODE = re.compile(
+    r"""
+    (?<!`)
+    (?P<ticks>`+)
+    (?!`)
+    (?P<text>.+?)
+    (?<!`)
+    (?P=ticks)
+    (?!`)
+    """,
+    flags=re.VERBOSE)
+LINK = re.compile(
+    r"""
+    \[(?P<text>.*?)\]           # [link text]
+    \(
+        (?P<url>.+?)
+        (?:[ ]\"(?P<title>.+)\")?
+    \)
+    """,
+    flags=re.VERBOSE)
+LINK_ALT = re.compile(
+    r"""
+    <(?P<text>(?P<url>((https?|ftp):[^'">\s]+)))>
+    """,
+    flags=re.VERBOSE)
+URL = re.compile(
+    r"[(http(s)?):\/\/(www\.)?a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)", re.I)
+IMAGE = re.compile(
+    r"""
+    !\[(?P<text>.*?)\]
+    \(
+        (?P<url>.+?)
+        (?:[ ]\"(?P<title>.+)\")?
+    \)
+    """,
+    flags=re.VERBOSE)
+HORIZONTAL_RULE = re.compile(
+    r"""
+    (?:^|\n{2,})[ ]{0,3}
+    (?P<symbols>
+        (-[ ]{0,2}){3,} |
+        (_[ ]{0,2}){3,} |
+        (\*[ ]{0,2}){3,}
+    )
+    [ \t]*
+    (?:\n{2,}|$)
+    """,
+    flags=re.VERBOSE)
+LIST = re.compile(
+    r"""
+    (?:^|\n)
+    (?P<content>
+        (?P<indent>(?:\t|[ ]{2})*)
+        (?P<symbol>(?:[\-*+]))
+        [ ](?!\[[xX ]\])
+        (?:\t|[ ]{2})*
+        (?P<text>
+            .+
+        )?
+    )
+    """,
+    flags=re.VERBOSE)
+CHECKLIST = re.compile(
+    r"""
+    (?:^|\n)
+    (?P<content>
+        (?P<indent>(?:\t|[ ]{2})*)
+        (?P<symbol>(?:[\-*+]))
+        [ ]\[(?P<check>(?:[xX ]))\][ ]
+        (?:\t|[ ]{4})*
+        (?P<text>
+            .+
+        )?
+    )
+    """,
+    flags=re.VERBOSE)
+ORDERED_LIST = re.compile(
+    r"""
+    (?:^|\n)
+    (?P<content>
+        (?P<indent>(?>\t|[ ]{2})*)
+        (?P<prefix>
+            (?:
+                (?P<number>\d+)
+            |
+                [a-z]+
+            )
+            (?P<delimiter>[.)])
+        )
+        [ \t]*
+        (?P<text>
+            .+
+        )?
+    )
+    """,
+    flags=re.VERBOSE)
+BLOCK_QUOTE = re.compile(
+    r"""
+    ^[ ]{0,3}(?:>[ ]?)+(?P<text>.+)
+    """,
+    flags=re.VERBOSE|re.MULTILINE)
+HEADER = re.compile(
+    r"""
+    ^
+    (?P<level>\#{1,6})[ ]
+    (?P<text>[^\n]+)
+    """,
+    flags=re.VERBOSE|re.MULTILINE)
+HEADER_UNDER = re.compile(
+    r"""
+    ^
+    (?P<text>.+)[ \t]*
+    \n
+    [=-]+[ \t]*
+    (?:\n)
+    """,
+    flags=re.VERBOSE|re.MULTILINE)
+CODE_BLOCK = re.compile(
+    r"""
+    ^[ ]{0,3}
+    (?P<block>
+        ([`~]{3})
+        (?P<text>.+?)
+        (?<![ ])[ ]{0,3}
+        \2
+    )
+    (?:\s+?$|$)
+    """,
+    flags=re.VERBOSE|re.DOTALL|re.MULTILINE)
+TABLE = re.compile(
+    r"^[\-+]{5,}\n(?P<text>.+?)\n[\-+]{5,}\n", re.S)
+MATH = re.compile(
+    r"""
+    ([$]{1,2})
+    (?P<text>
+        [^`\\ ]{1,2}
+        |
+        [^` ].+?[^`\\ ])
+    \1
+    """,
+    flags=re.VERBOSE|re.DOTALL|re.MULTILINE)
+FOOTNOTE_ID = re.compile(
+    r"""
+    (?P<text>[^\s]+)
+    \[\^(?P<id>[^\s]+)\]
+    """,
+    flags=re.VERBOSE)
+FOOTNOTE = re.compile(
+    r"""
+    [ ]{0,3}
+    \[\^(?P<id>[^\s]+)\]:
+    [ ]{0,7}
+    (?P<text>
+        (?:
+            [^\n]+
+        |
+            \n+(?=(?:\t|[ ]{4}))
+        )+
+    )
+    (?:\n+|$)
+    """,
+    flags=re.VERBOSE|re.MULTILINE)
+FRONTMATTER = re.compile(
+    r"^(?:---)\n(?P<text>.+?)\n(?:---|\.{3})", re.DOTALL
+)

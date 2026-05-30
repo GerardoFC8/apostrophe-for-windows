@@ -1,0 +1,11 @@
+# Workspace Cargo en la RAIZ del repo (ADR-0001: frontera dominio/presentacion).
+#
+# Por que workspace y no un modulo dentro de src-tauri:
+#   El crate `apostrophe-core` es el DOMINIO PURO (hexagonal) y NO depende de Tauri.
+#   Al estar separado, `cargo test -p apostrophe-core` compila en SEGUNDOS en vez de
+#   linkear WebKitGTK (~2m). Eso es lo que hace viable el ciclo TDD rojo-verde-refactor.
+#
+#   src-tauri = adaptador primario (Tauri). crates/apostrophe-core = nucleo de dominio.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/apostrophe-core"]

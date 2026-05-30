@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust / Cargo (workspace en la raiz: target y artefactos van aca)
+# Cargo.lock SI se versiona (esto es una app, no una libreria publicada).
+/target
