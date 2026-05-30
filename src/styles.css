@@ -260,3 +260,39 @@ body {
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+
+/* Spellcheck (M6): ondulita roja bajo palabras mal escritas + menu de sugerencias. */
+.cm-spell-error {
+  text-decoration: underline wavy #e01b24;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+}
+
+.spell-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.spell-item {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: default;
+}
+
+.spell-item:hover {
+  background: var(--hover);
+}

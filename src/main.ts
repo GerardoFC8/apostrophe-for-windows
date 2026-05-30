@@ -10,6 +10,7 @@ import { Transaction } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, keymap } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { spellcheckExtension, requestSpellCheck } from "./spellcheck";
 
 // M3: editor CodeMirror 6. M4: abrir/guardar .md. M5: temas light/dark/sepia +
 // export a HTML. La logica esta en Rust; la WebView solo PRESENTA. La frontera IPC
@@ -333,12 +334,17 @@ async function exportDoc(): Promise<void> {
   }
 }
 
+// M6: focus mode todavia no existe como feature; el hook queda cableado (WU6). Cuando
+// exista, isFocusMode() devuelve true y el spellcheck se auto-desactiva (ADR-0001 D2).
+const isFocusMode = (): boolean => false;
+
 function scheduleUpdate(): void {
   if (timer !== undefined) clearTimeout(timer);
   timer = window.setTimeout(() => {
     void render();
     void updateStats();
     void syncDoc();
+    void requestSpellCheck(view, getText(), isFocusMode());
   }, DEBOUNCE_MS);
 }
 
@@ -374,6 +380,7 @@ const view = new EditorView({
     closeBrackets(),
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
     editorTheme,
+    spellcheckExtension,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleUpdate();
     }),
@@ -383,3 +390,6 @@ const view = new EditorView({
 applyTheme(getInitialTheme()); // fija el tema antes del primer render (sin flash)
 void render();
 void updateStats();
+// Spellcheck inicial (puede volver [] si el diccionario aun se esta cargando en
+// background; el primer tecleo lo re-dispara cuando el dict ya esta listo).
+void requestSpellCheck(view, getText(), isFocusMode());
