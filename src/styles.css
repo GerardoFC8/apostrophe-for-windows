@@ -118,6 +118,82 @@ body {
   background: var(--hover);
 }
 
+/* Selector de tema (desplegable con iconos). */
+.theme-select {
+  position: relative;
+  margin-right: 0.4rem;
+}
+
+.theme-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 0; /* la margin la lleva .theme-select */
+}
+
+.theme-trigger-icon {
+  display: inline-flex;
+}
+
+.theme-trigger .chevron {
+  opacity: 0.55;
+}
+
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  z-index: 20;
+}
+
+.theme-menu[hidden] {
+  display: none;
+}
+
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: default;
+}
+
+.theme-item-icon {
+  display: inline-flex;
+  opacity: 0.85;
+}
+
+.theme-item:hover {
+  background: var(--hover);
+}
+
+.theme-item[aria-checked="true"] {
+  color: var(--accent);
+}
+
+.theme-item .check {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.theme-item[aria-checked="true"] .check {
+  opacity: 1;
+}
+
 .window-controls {
   display: flex;
   height: 100%;

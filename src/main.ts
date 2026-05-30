@@ -47,7 +47,10 @@ const editorParent = document.querySelector<HTMLElement>("#editor")!;
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 const status = document.querySelector<HTMLElement>("#status")!;
 const docName = document.querySelector<HTMLElement>("#doc-name")!;
-const themeBtn = document.querySelector<HTMLButtonElement>("#theme-btn")!;
+const themeTrigger = document.querySelector<HTMLButtonElement>("#theme-trigger")!;
+const themeTriggerIcon = document.querySelector<HTMLElement>("#theme-trigger-icon")!;
+const themeTriggerLabel = document.querySelector<HTMLElement>("#theme-trigger-label")!;
+const themeMenu = document.querySelector<HTMLElement>("#theme-menu")!;
 const exportBtn = document.querySelector<HTMLButtonElement>("#export-btn")!;
 const statWords = document.querySelector<HTMLElement>("#stat-words")!;
 const statChars = document.querySelector<HTMLElement>("#stat-chars")!;
@@ -89,7 +92,17 @@ window.addEventListener("keydown", (e) => {
 // --- M5: temas (light / dark / sepia) ---
 const THEMES = ["light", "dark", "sepia"] as const;
 type Theme = (typeof THEMES)[number];
-const THEME_LABEL: Record<Theme, string> = { light: "Light", dark: "Dark", sepia: "Sepia" };
+const THEME_LABEL: Record<Theme, string> = { light: "Claro", dark: "Oscuro", sepia: "Sepia" };
+
+// Iconos SVG (stroke = currentColor, heredan el color del tema). Sol / luna / libro.
+const ICON: Record<Theme, string> = {
+  light:
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.2V2.8M8 13.2V14.8M1.2 8H2.8M13.2 8H14.8M3.4 3.4 4.5 4.5M11.5 11.5 12.6 12.6M12.6 3.4 11.5 4.5M4.5 11.5 3.4 12.6"/></svg>',
+  dark:
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M13.4 9.3A5.6 5.6 0 0 1 6.7 2.6 5.6 5.6 0 1 0 13.4 9.3Z"/></svg>',
+  sepia:
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 3.6C6.6 2.7 4.2 2.7 2.7 3.2V12c1.5-.5 3.9-.5 5.3.4M8 3.6c1.4-.9 3.8-.9 5.3-.4V12c-1.5-.5-3.9-.5-5.3.4M8 3.6V12.4"/></svg>',
+};
 
 function getInitialTheme(): Theme {
   const saved = localStorage.getItem("theme");
@@ -126,19 +139,55 @@ function withTheme(html: string): string {
 function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("theme", theme);
-  themeBtn.textContent = THEME_LABEL[theme];
-  // Re-tematizar el preview ya renderizado (el editor/chrome se actualizan solos via vars).
+  // Reflejar en el trigger del selector y marcar el item activo del menu.
+  themeTriggerIcon.innerHTML = ICON[theme];
+  themeTriggerLabel.textContent = THEME_LABEL[theme];
+  themeMenu.querySelectorAll<HTMLElement>(".theme-item").forEach((item) => {
+    item.setAttribute("aria-checked", String(item.dataset.theme === theme));
+  });
+  // Re-tematizar el preview ya renderizado (editor/chrome se actualizan solos via vars).
   if (lastPreviewHtml) preview.srcdoc = withTheme(lastPreviewHtml);
 }
 
-function cycleTheme(): void {
-  const current = (document.documentElement.dataset.theme as Theme) || "light";
-  const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
-  applyTheme(next);
+// Construye el menu del selector: un item por tema (icono + label + check del activo).
+function buildThemeMenu(): void {
+  themeMenu.innerHTML = THEMES.map(
+    (t) =>
+      `<button class="theme-item" type="button" role="menuitemradio" data-theme="${t}" aria-checked="false">` +
+      `<span class="theme-item-icon">${ICON[t]}</span><span>${THEME_LABEL[t]}</span>` +
+      '<svg class="check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4 L5 8.9 L9.5 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      "</button>"
+  ).join("");
+  themeMenu.querySelectorAll<HTMLButtonElement>(".theme-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      applyTheme(item.dataset.theme as Theme);
+      closeThemeMenu();
+    });
+  });
 }
 
-themeBtn.addEventListener("click", cycleTheme);
+function openThemeMenu(): void {
+  themeMenu.hidden = false;
+  themeTrigger.setAttribute("aria-expanded", "true");
+}
+function closeThemeMenu(): void {
+  themeMenu.hidden = true;
+  themeTrigger.setAttribute("aria-expanded", "false");
+}
+
+themeTrigger.addEventListener("click", (e) => {
+  e.stopPropagation(); // que no llegue al cierre-por-click-afuera de document
+  if (themeMenu.hidden) openThemeMenu();
+  else closeThemeMenu();
+});
+document.addEventListener("click", () => closeThemeMenu()); // click afuera cierra
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeThemeMenu();
+});
+
 exportBtn.addEventListener("click", () => void exportDoc());
+
+buildThemeMenu();
 
 // Tema del editor (Adwaita-ish): hereda los colores via CSS vars (cambian con data-theme),
 // tipografia JetBrains Mono. El acento es el azul Adwaita.

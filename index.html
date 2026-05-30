@@ -13,7 +13,16 @@
       <span class="brand" data-tauri-drag-region>Apostrophe</span>
       <span id="doc-name" class="doc-name" data-tauri-drag-region>Sin título</span>
       <span id="status" class="status" data-tauri-drag-region>—</span>
-      <button class="bar-btn" id="theme-btn" type="button" title="Cambiar tema (light / dark / sepia)">Tema</button>
+      <div class="theme-select">
+        <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" title="Tema">
+          <span class="theme-trigger-icon" id="theme-trigger-icon"></span>
+          <span id="theme-trigger-label">Claro</span>
+          <svg class="chevron" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2.2 3.6 L5 6.4 L7.8 3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="theme-menu" id="theme-menu" role="menu" hidden></div>
+      </div>
       <button class="bar-btn" id="export-btn" type="button" title="Exportar a HTML (Ctrl+E)">Exportar</button>
       <div class="window-controls">
         <button class="win-btn" id="win-min" type="button" aria-label="Minimizar" title="Minimizar">
