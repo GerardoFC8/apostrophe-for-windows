@@ -1,18 +1,50 @@
+/* Sistema de temas (M5): el switcher (main.ts) pone data-theme en <html>. Cada tema
+   define el set completo de CSS vars; el editor (CM6), el chrome y el preview las
+   consumen, asi cambiar de tema re-estiliza TODO en vivo sin reconfigurar nada.
+   Paleta inspirada en Adwaita (GNOME). */
 :root {
-  color-scheme: light dark;
-  /* Paleta Adwaita-ish (M3). M5 la extiende a un selector de tema light/dark/sepia. */
-  --accent: #3584e4; /* azul Adwaita */
-  --editor-fg: #2e3436; /* texto del editor (light) */
+  color-scheme: light;
+  --accent: #3584e4;
+  --bg: #ffffff;
+  --chrome-fg: #2e3436;
+  --editor-fg: #2e3436;
   --selection: rgba(53, 132, 228, 0.22);
   --active-line: rgba(53, 132, 228, 0.06);
+  --border: rgba(128, 128, 128, 0.25);
+  --hover: rgba(128, 128, 128, 0.16);
+  --preview-bg: #ffffff;
+  --preview-fg: #2e3436;
+  --preview-code-bg: rgba(128, 128, 128, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --editor-fg: #deddda;
-    --selection: rgba(53, 132, 228, 0.35);
-    --active-line: rgba(255, 255, 255, 0.04);
-  }
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #62a0ea;
+  --bg: #242424;
+  --chrome-fg: #deddda;
+  --editor-fg: #deddda;
+  --selection: rgba(98, 160, 234, 0.32);
+  --active-line: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.1);
+  --hover: rgba(255, 255, 255, 0.1);
+  --preview-bg: #2d2d2d;
+  --preview-fg: #deddda;
+  --preview-code-bg: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="sepia"] {
+  color-scheme: light;
+  --accent: #1c71d8;
+  --bg: #f4ecd8;
+  --chrome-fg: #5b4636;
+  --editor-fg: #5b4636;
+  --selection: rgba(28, 113, 216, 0.18);
+  --active-line: rgba(91, 70, 54, 0.05);
+  --border: rgba(91, 70, 54, 0.18);
+  --hover: rgba(91, 70, 54, 0.1);
+  --preview-bg: #f4ecd8;
+  --preview-fg: #5b4636;
+  --preview-code-bg: rgba(91, 70, 54, 0.1);
 }
 
 * {
@@ -29,6 +61,8 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
+  color: var(--chrome-fg);
   /* Inter Variable (≈ Adwaita Sans del GNOME actual). Fallbacks por si el bundle falla. */
   font-family: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   /* Antialiasing crisp estilo GNOME en WebView2/Chromium. */
@@ -44,7 +78,7 @@ body {
   align-items: center;
   height: 38px;
   padding-left: 0.8rem;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   user-select: none;
 }
@@ -60,8 +94,26 @@ body {
 
 .status {
   opacity: 0.65;
-  margin-left: auto; /* empuja status + controles al borde derecho */
+  margin-left: auto; /* empuja el resto al borde derecho */
   margin-right: 0.6rem;
+}
+
+/* Botones de la titlebar (tema, export): chips sutiles antes de los controles. */
+.bar-btn {
+  height: 24px;
+  margin-right: 0.4rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: default;
+}
+
+.bar-btn:hover {
+  background: var(--hover);
 }
 
 .window-controls {
@@ -85,7 +137,7 @@ body {
 }
 
 .win-btn:hover {
-  background: rgba(128, 128, 128, 0.18);
+  background: var(--hover);
 }
 
 .win-close:hover {
@@ -101,8 +153,7 @@ body {
 }
 
 /* Host de CodeMirror 6: la tipografia/padding/colores los pone el tema del editor
-   (editorTheme en main.ts). Aca solo el layout para que CM6 llene la columna y
-   scrollee bien dentro del grid. */
+   (editorTheme en main.ts, que lee las CSS vars). Aca solo el layout. */
 .editor {
   min-width: 0;
   min-height: 0;
@@ -115,17 +166,17 @@ body {
 
 .preview {
   border: 0;
-  border-left: 1px solid rgba(128, 128, 128, 0.3);
+  border-left: 1px solid var(--border);
   width: 100%;
   height: 100%;
-  background: #fff;
+  background: var(--preview-bg);
 }
 
 .statusbar {
   display: flex;
   gap: 1.2rem;
   padding: 0.35rem 0.8rem;
-  border-top: 1px solid rgba(128, 128, 128, 0.3);
+  border-top: 1px solid var(--border);
   font-size: 0.8rem;
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
