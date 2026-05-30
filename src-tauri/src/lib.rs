@@ -2,13 +2,13 @@
 // frontera dominio<->presentacion. La logica vive en `apostrophe-core`; aca solo
 // se orquestan los procesos externos (pandoc) y se serializa el resultado.
 //
-// M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado
-// (externalBin). La app ya no depende de que el usuario tenga pandoc instalado.
+// M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado.
+// M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use apostrophe_core::document::DocumentStore;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -87,7 +87,14 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
 // state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
-// tauri-plugin-dialog. La WebView solo dispara los comandos y refleja el estado.
+// tauri-plugin-dialog.
+//
+// CRITICO (review M4): los comandos que abren dialogos son `async` y corren el
+// dialogo en `spawn_blocking`. Si fueran sincronos correrian INLINE en el main
+// thread de WebView2, y `blocking_pick_file`/`blocking_save_file` bloquean ese
+// thread mientras el dialogo se encola en el MISMO thread -> DEADLOCK (la app se
+// congela). En async + spawn_blocking el bloqueo ocurre en un hilo de pool y el
+// main thread queda libre para procesar el dialogo.
 
 type Doc = Mutex<DocumentStore>;
 
@@ -107,7 +114,7 @@ struct DocStatus {
 }
 
 /// Sincroniza el texto del editor con el store (se llama en el debounce) y devuelve
-/// el estado para el indicador de "modificado".
+/// el estado para el indicador de "modificado". No abre dialogos -> puede ser sincrono.
 #[tauri::command]
 fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
     let mut store = doc.lock().unwrap();
@@ -118,19 +125,47 @@ fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
     }
 }
 
-/// Abre un .md con dialogo nativo + lectura de disco (std::fs). `None` si se cancela.
+/// Abre un .md. Si el documento actual tiene cambios sin guardar, CONFIRMA antes
+/// (anti-perdida de datos, review M4). `async` + dialogos en spawn_blocking.
 #[tauri::command]
-fn open_document(
+async fn open_document(
     app: tauri::AppHandle,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    let Some(file_path) = app
-        .dialog()
-        .file()
-        .add_filter("Markdown", &["md", "markdown", "txt"])
-        .blocking_pick_file()
-    else {
-        return Ok(None); // el usuario cancelo el dialogo
+    // Guarda anti-perdida: si hay cambios sin guardar, pedir confirmacion.
+    if doc.lock().unwrap().is_dirty() {
+        let app2 = app.clone();
+        let discard = tauri::async_runtime::spawn_blocking(move || {
+            app2.dialog()
+                .message("Tenés cambios sin guardar que se van a perder. ¿Abrir otro archivo igual?")
+                .title("Cambios sin guardar")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Descartar y abrir".into(),
+                    "Cancelar".into(),
+                ))
+                .blocking_show()
+        })
+        .await
+        .map_err(|e| format!("error en el dialogo: {e}"))?;
+        if !discard {
+            return Ok(None); // el usuario cancelo: NO se pierde nada
+        }
+    }
+
+    // Picker en un hilo de pool (NO en el main thread -> sin deadlock).
+    let app2 = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app2.dialog()
+            .file()
+            .add_filter("Markdown", &["md", "markdown", "txt"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("error en el dialogo: {e}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None); // el usuario cancelo el picker
     };
     let path = file_path
         .into_path()
@@ -138,31 +173,35 @@ fn open_document(
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
 
-    let mut store = doc.lock().unwrap();
-    store.open(path, content.clone());
+    // Datos para el frontend, tomados directo de lo ya leido (no re-derivar del store).
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let path_str = path.to_string_lossy().into_owned();
+
+    doc.lock().unwrap().open(path, content.clone());
     Ok(Some(OpenedDoc {
-        path: store
-            .path()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        file_name: store.file_name().unwrap_or_default(),
+        path: path_str,
+        file_name,
         content,
     }))
 }
 
-/// Guarda: si el doc tiene path escribe ahi y marca limpio; si no, delega en
-/// "guardar como". `None` si se cancela el dialogo de guardar como.
+/// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
+/// `async` por la posible delegacion al dialogo de save_document_as.
 #[tauri::command]
-fn save_document(
+async fn save_document(
     app: tauri::AppHandle,
     text: String,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<DocStatus>, String> {
     let existing = doc.lock().unwrap().path().cloned();
     let Some(path) = existing else {
-        return save_document_as(app, text, doc);
+        return save_document_as(app, text, doc).await;
     };
     std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
+    // Actualizacion de estado atomica bajo un solo lock (set_content + mark_clean).
     let mut store = doc.lock().unwrap();
     store.set_content(text);
     store.mark_clean();
@@ -172,20 +211,25 @@ fn save_document(
     }))
 }
 
-/// Guardar como: siempre dialogo nativo. Fija el nuevo path y marca limpio.
+/// Guardar como: siempre dialogo nativo (en spawn_blocking). Fija el path y marca limpio.
 #[tauri::command]
-fn save_document_as(
+async fn save_document_as(
     app: tauri::AppHandle,
     text: String,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<DocStatus>, String> {
-    let Some(file_path) = app
-        .dialog()
-        .file()
-        .add_filter("Markdown", &["md"])
-        .set_file_name("sin-titulo.md")
-        .blocking_save_file()
-    else {
+    let app2 = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app2.dialog()
+            .file()
+            .add_filter("Markdown", &["md"])
+            .set_file_name("sin-titulo.md")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("error en el dialogo: {e}"))?;
+
+    let Some(file_path) = picked else {
         return Ok(None);
     };
     let path = file_path

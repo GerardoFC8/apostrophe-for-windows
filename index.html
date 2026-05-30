@@ -33,7 +33,10 @@
     </header>
     <main class="split">
       <div id="editor" class="editor"></div>
-      <iframe id="preview" class="preview" title="preview"></iframe>
+      <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
+           acceder a window.parent.__TAURI__ (cierra XSS via .md malicioso). allow-scripts
+           deja correr MathJax. -->
+      <iframe id="preview" class="preview" title="preview" sandbox="allow-scripts"></iframe>
     </main>
     <footer class="statusbar">
       <span id="stat-words">0 palabras</span>

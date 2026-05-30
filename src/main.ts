@@ -6,7 +6,8 @@ import "@fontsource-variable/jetbrains-mono";
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { EditorView, keymap, drawSelection, highlightActiveLine } from "@codemirror/view";
+import { Transaction } from "@codemirror/state";
+import { EditorView, drawSelection, highlightActiveLine, keymap } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
@@ -60,6 +61,23 @@ document.querySelector("#win-min")?.addEventListener("click", () => void appWind
 document.querySelector("#win-max")?.addEventListener("click", () => void appWindow.toggleMaximize());
 document.querySelector("#win-close")?.addEventListener("click", () => void appWindow.close());
 
+// M4: atajos de archivo a nivel WINDOW (no solo en CM6) — asi funcionan aunque el
+// foco NO este en el editor (titlebar, etc.). Shift+S se chequea ANTES que S sola.
+window.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === "o") {
+    e.preventDefault();
+    void openDoc();
+  } else if (k === "s" && e.shiftKey) {
+    e.preventDefault();
+    void saveDocAs();
+  } else if (k === "s") {
+    e.preventDefault();
+    void saveDoc();
+  }
+});
+
 // Tema del editor (Adwaita-ish): hereda los colores de la pagina via CSS vars
 // (light/dark en styles.css), tipografia JetBrains Mono. El acento es el azul Adwaita.
 const editorTheme = EditorView.theme({
@@ -95,19 +113,28 @@ function formatReadTime(rt: ReadTime): string {
   return `${parts.join(" ")} de lectura`;
 }
 
+// Escapa HTML para no inyectar markup al mostrar errores en el iframe del preview.
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
+}
+
 function getText(): string {
   return view.state.doc.toString();
 }
 
-// Reemplaza TODO el contenido del editor (al abrir un archivo). Dispara el
-// updateListener -> debounce, que recalcula preview/stats y sincroniza el store.
+// Reemplaza TODO el contenido del editor (al abrir un archivo). `addToHistory: false`
+// para que el cambio NO sea deshacible: Ctrl+Z tras abrir NO debe revertir al doc
+// anterior (eso desincronizaria editor y store -> riesgo de guardar lo viejo).
 function setEditorText(text: string): void {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: text },
+    annotations: Transaction.addToHistory.of(false),
+  });
 }
 
 // Titlebar: nombre del archivo (o "Sin título") + indicador ● de cambios sin guardar.
 function updateTitlebar(fileName: string | null, dirty: boolean): void {
-  const name = fileName ?? "Sin título";
+  const name = fileName || "Sin título";
   docName.textContent = dirty ? `${name} ●` : name;
 }
 
@@ -119,7 +146,7 @@ async function render(): Promise<void> {
     status.textContent = "listo";
   } catch (err) {
     status.textContent = "error";
-    preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${String(err)}</pre>`;
+    preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;
   }
 }
 
@@ -147,11 +174,11 @@ async function syncDoc(): Promise<void> {
   }
 }
 
-// M4: abrir un .md (dialogo nativo). Carga el contenido en el editor.
+// M4: abrir un .md (dialogo nativo). El Rust confirma si hay cambios sin guardar.
 async function openDoc(): Promise<void> {
   try {
     const opened = await invoke<OpenedDoc | null>("open_document");
-    if (!opened) return; // cancelado
+    if (!opened) return; // cancelado (o se eligio NO descartar cambios)
     setEditorText(opened.content);
     updateTitlebar(opened.file_name, false);
     status.textContent = "abierto";
@@ -213,7 +240,8 @@ const SAMPLE = [
 ].join("\n");
 
 // CodeMirror 6: editor de verdad (undo/redo, line-wrap, cierre de brackets) SIN
-// gramatica Lezer (ADR-0001 D1). El updateListener dispara el mismo debounce.
+// gramatica Lezer (ADR-0001 D1). Los atajos de archivo van a nivel window (arriba),
+// no en el keymap de CM6, para que anden sin foco en el editor y sin doble disparo.
 const view = new EditorView({
   doc: SAMPLE,
   parent: editorParent,
@@ -223,12 +251,6 @@ const view = new EditorView({
     highlightActiveLine(),
     EditorView.lineWrapping,
     closeBrackets(),
-    // M4: atajos de archivo (mayor precedencia, van primeros). Mod = Ctrl/Cmd.
-    keymap.of([
-      { key: "Mod-o", run: () => { void openDoc(); return true; } },
-      { key: "Mod-s", run: () => { void saveDoc(); return true; } },
-      { key: "Mod-Shift-s", run: () => { void saveDocAs(); return true; } },
-    ]),
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
     editorTheme,
     EditorView.updateListener.of((update) => {
