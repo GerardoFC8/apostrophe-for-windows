@@ -250,15 +250,27 @@ function updateTitlebar(fileName: string | null, dirty: boolean): void {
   docName.textContent = dirty ? `${name} ●` : name;
 }
 
+// Estado TRANSITORIO en la titlebar: muestra feedback de accion (guardado, exportado,
+// error...) y se auto-limpia. En reposo la barra queda limpia (no un "listo" permanente),
+// coherente con el ethos distraction-free de Apostrophe.
+let statusTimer: number | undefined;
+function flashStatus(msg: string, ms = 1800): void {
+  status.textContent = msg;
+  if (statusTimer !== undefined) clearTimeout(statusTimer);
+  statusTimer = window.setTimeout(() => {
+    status.textContent = "";
+  }, ms);
+}
+
 async function render(): Promise<void> {
-  status.textContent = "convirtiendo…";
+  // El preview que se actualiza YA es el feedback; no se ensucia la barra con
+  // "convirtiendo…"/"listo". Solo se avisa si falla (ademas del error en el panel).
   try {
     const html = await invoke<string>("preview_markdown", { text: getText() });
     lastPreviewHtml = html;
     preview.srcdoc = withTheme(html);
-    status.textContent = "listo";
   } catch (err) {
-    status.textContent = "error";
+    flashStatus("error de preview", 4000);
     preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;
   }
 }
@@ -294,9 +306,9 @@ async function openDoc(): Promise<void> {
     if (!opened) return; // cancelado (o se eligio NO descartar cambios)
     setEditorText(opened.content);
     updateTitlebar(opened.file_name, false);
-    status.textContent = "abierto";
+    flashStatus("abierto");
   } catch (err) {
-    status.textContent = `error al abrir: ${String(err)}`;
+    flashStatus(`error al abrir: ${String(err)}`, 4000);
   }
 }
 
@@ -306,9 +318,9 @@ async function saveDoc(): Promise<void> {
     const st = await invoke<DocStatus | null>("save_document", { text: getText() });
     if (!st) return; // cancelado
     updateTitlebar(st.file_name, st.dirty);
-    status.textContent = "guardado";
+    flashStatus("guardado");
   } catch (err) {
-    status.textContent = `error al guardar: ${String(err)}`;
+    flashStatus(`error al guardar: ${String(err)}`, 4000);
   }
 }
 
@@ -318,20 +330,21 @@ async function saveDocAs(): Promise<void> {
     const st = await invoke<DocStatus | null>("save_document_as", { text: getText() });
     if (!st) return; // cancelado
     updateTitlebar(st.file_name, st.dirty);
-    status.textContent = "guardado";
+    flashStatus("guardado");
   } catch (err) {
-    status.textContent = `error al guardar: ${String(err)}`;
+    flashStatus(`error al guardar: ${String(err)}`, 4000);
   }
 }
 
 // M5: exportar a HTML (dialogo "guardar como .html" + pandoc sidecar).
 async function exportDoc(): Promise<void> {
-  status.textContent = "exportando…";
+  status.textContent = "exportando…"; // en-progreso (sin auto-limpiar hasta terminar)
   try {
     const out = await invoke<string | null>("export_document", { text: getText() });
-    status.textContent = out ? "exportado" : "listo";
+    if (out) flashStatus("exportado");
+    else status.textContent = ""; // cancelado
   } catch (err) {
-    status.textContent = `error al exportar: ${String(err)}`;
+    flashStatus(`error al exportar: ${String(err)}`, 4000);
   }
 }
 
