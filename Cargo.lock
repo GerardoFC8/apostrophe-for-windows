@@ -51,6 +51,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "apostrophe"
 version = "0.1.0"
 dependencies = [
+ "apostrophe-core",
  "serde",
  "serde_json",
  "tauri",
@@ -63,6 +64,7 @@ name = "apostrophe-core"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "serde",
 ]
 
 [[package]]

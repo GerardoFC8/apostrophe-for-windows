@@ -46,11 +46,19 @@ fn preview_markdown(text: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Adaptador primario (IPC): expone el contador de stats del dominio. La logica
+/// vive en `apostrophe_core::stats`; este comando solo cruza la frontera hexagonal.
+/// La frontera es gruesa y con debounce (ADR-0001): se manda el texto, vuelve Stats.
+#[tauri::command]
+fn count_stats(text: String) -> apostrophe_core::stats::Stats {
+    apostrophe_core::stats::count(&text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![preview_markdown])
+        .invoke_handler(tauri::generate_handler![preview_markdown, count_stats])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

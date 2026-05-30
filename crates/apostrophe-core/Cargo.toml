@@ -10,6 +10,12 @@ authors = ["Gerardo Franco"]
 # que NO usan lookaround y portan directo. CHARACTERS y PARAGRAPHS se implementan
 # imperativamente (usan lookahead que este crate no soporta; ver docs/upstream-reference).
 regex = "1"
+# serde OPCIONAL: el dominio es puro por defecto (no lo arrastra). Solo el adaptador
+# (src-tauri) activa el feature `serde` para serializar Stats/ReadTime al cruzar el IPC.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 # Para los tests del dominio. Candidato cuando haya casos parametrizados: rstest.

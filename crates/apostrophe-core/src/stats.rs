@@ -33,6 +33,7 @@ static SENTENCES_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("[^\n][.。।෴۔።?՞;⸮؟？፧꘏⳺⳻⁇﹖⁈⁉‽!﹗！՜߹႟᥄\n]+").unwrap());
 
 /// Tiempo estimado de lectura, descompuesto como en el original (tupla h/m/s).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadTime {
     pub hours: u32,
@@ -44,6 +45,7 @@ pub struct ReadTime {
 /// devuelve `do_count` en el upstream: (characters, words, sentences,
 /// paragraphs, read_time). El docstring original dice 4 campos pero esta
 /// desactualizado: son 5.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
     pub characters: usize,
