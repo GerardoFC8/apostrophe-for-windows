@@ -46,6 +46,44 @@ pub fn preview_args(opts: &PreviewOptions) -> Vec<String> {
     args
 }
 
+/// Formato de salida para EXPORTAR (M5). HTML primero; PDF (Typst)/DOCX/etc. post-MVP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFormat {
+    Html,
+}
+
+impl ExportFormat {
+    /// Valor de `--to` de pandoc.
+    pub fn pandoc_to(self) -> &'static str {
+        match self {
+            ExportFormat::Html => "html5",
+        }
+    }
+
+    /// Extension de archivo sugerida (sin punto).
+    pub fn extension(self) -> &'static str {
+        match self {
+            ExportFormat::Html => "html",
+        }
+    }
+}
+
+/// Construye los args de pandoc para EXPORTAR a `output_path` en `format`:
+/// `--from markdown --to <fmt> --standalone --mathjax --output <path>`. El input
+/// (la ruta del temporal con el markdown) lo antepone el adaptador, igual que el preview.
+pub fn export_args(format: ExportFormat, output_path: &str) -> Vec<String> {
+    vec![
+        "--from".to_string(),
+        "markdown".to_string(),
+        "--to".to_string(),
+        format.pandoc_to().to_string(),
+        "--standalone".to_string(),
+        "--mathjax".to_string(),
+        "--output".to_string(),
+        output_path.to_string(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     //! Oraculo: los args hardcodeados del spike `src-tauri/lib.rs::preview_markdown`
@@ -92,5 +130,23 @@ mod tests {
             preview_args(&opts),
             ["--from", "markdown", "--to", "html5", "--standalone"]
         );
+    }
+
+    #[test]
+    fn export_args_html_tiene_output_y_standalone() {
+        let args = export_args(ExportFormat::Html, "/tmp/out.html");
+        assert_eq!(
+            args,
+            [
+                "--from", "markdown", "--to", "html5", "--standalone", "--mathjax", "--output",
+                "/tmp/out.html"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_format_metadata() {
+        assert_eq!(ExportFormat::Html.pandoc_to(), "html5");
+        assert_eq!(ExportFormat::Html.extension(), "html");
     }
 }

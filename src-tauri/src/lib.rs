@@ -245,6 +245,50 @@ async fn save_document_as(
     }))
 }
 
+/// Exporta el markdown a un archivo HTML elegido por el usuario (dialogo nativo).
+/// Reusa el sidecar pandoc via el Converter port (export_args). Devuelve la ruta de
+/// salida, o `None` si se cancela. `async` + spawn_blocking (gotcha deadlock M4).
+#[tauri::command]
+async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<String>, String> {
+    use apostrophe_core::convert::{export_args, ExportFormat};
+
+    let app2 = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app2.dialog()
+            .file()
+            .add_filter("HTML", &[ExportFormat::Html.extension()])
+            .set_file_name("documento.html")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("error en el dialogo: {e}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let out_path = file_path
+        .into_path()
+        .map_err(|e| format!("ruta invalida: {e}"))?;
+    let out_str = out_path.to_string_lossy().into_owned();
+
+    // Markdown a un temporal; pandoc exporta con --output a la ruta elegida.
+    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!(
+        "apostrophe-export-{}-{}.md",
+        std::process::id(),
+        seq
+    ));
+    std::fs::write(&tmp, text.as_bytes())
+        .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
+
+    let mut args = vec![tmp.to_string_lossy().into_owned()];
+    args.extend(export_args(ExportFormat::Html, &out_str));
+
+    let result = run_pandoc_sidecar(&app, args).await;
+    let _ = std::fs::remove_file(&tmp);
+    result.map(|_| Some(out_str)) // pandoc escribe en --output; su stdout queda vacio
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -258,7 +302,8 @@ pub fn run() {
             set_content,
             open_document,
             save_document,
-            save_document_as
+            save_document_as,
+            export_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
