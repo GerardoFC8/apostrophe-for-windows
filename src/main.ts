@@ -6,6 +6,7 @@ import "@fontsource-variable/jetbrains-mono";
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { Transaction } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, keymap } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
@@ -391,5 +392,9 @@ applyTheme(getInitialTheme()); // fija el tema antes del primer render (sin flas
 void render();
 void updateStats();
 // Spellcheck inicial (puede volver [] si el diccionario aun se esta cargando en
-// background; el primer tecleo lo re-dispara cuando el dict ya esta listo).
+// background). Cuando el dict termina de cargar, Rust emite "spell-dict-ready" y
+// re-chequeamos el doc actual — asi no hay que esperar al primer tecleo (review M6).
 void requestSpellCheck(view, getText(), isFocusMode());
+void listen("spell-dict-ready", () => {
+  void requestSpellCheck(view, getText(), isFocusMode());
+});

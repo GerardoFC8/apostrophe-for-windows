@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use apostrophe_core::document::DocumentStore;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
 use tauri::path::BaseDirectory;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -358,6 +358,9 @@ fn load_dictionary(app: &tauri::AppHandle) {
         match loaded {
             Ok(Ok(dict)) => {
                 *handle.state::<SpellState>().0.write().unwrap() = Some(Arc::new(dict));
+                // Avisar al front para re-chequear (el chequeo inicial pudo volver []
+                // porque el dict aun no estaba cargado) — review M6.
+                let _ = handle.emit("spell-dict-ready", ());
             }
             Ok(Err(e)) => eprintln!("spellcheck: no se pudo cargar el diccionario es: {e}"),
             Err(e) => eprintln!("spellcheck: error de join cargando el diccionario: {e}"),

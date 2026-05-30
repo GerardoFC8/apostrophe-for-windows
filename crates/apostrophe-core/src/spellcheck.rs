@@ -86,7 +86,7 @@ fn tokenize(text: &str) -> Vec<(usize, usize, String)> {
     let mut cur = String::new();
     let mut ci = 0usize; // char index
     for c in text.chars() {
-        if c.is_alphabetic() {
+        if is_word_char(c) {
             if cur.is_empty() {
                 start = ci;
             }
@@ -100,6 +100,22 @@ fn tokenize(text: &str) -> Vec<(usize, usize, String)> {
         words.push((start, ci, cur));
     }
     words
+}
+
+/// Un char es parte de una palabra si es alfabetico O una MARCA COMBINANTE (acentos
+/// DESCOMPUESTOS NFD, p.ej. U+0301 que puede llegar al pegar texto). Sin esto, un acento
+/// NFD partiria la palabra en dos y se marcarian falsos errores (review M6). No cambia
+/// el conteo de chars -> los offsets siguen 1:1 con CodeMirror (a diferencia de
+/// normalizar a NFC, que SI cambiaria la cantidad de chars y desincronizaria).
+fn is_word_char(c: char) -> bool {
+    c.is_alphabetic() || is_combining_mark(c)
+}
+
+fn is_combining_mark(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F
+    )
 }
 
 /// Rangos (char index) que NO se deben chequear: codigo (inline y fence, corridas de
@@ -131,10 +147,15 @@ fn skip_ranges(text: &str) -> Vec<(usize, usize)> {
                     run += 1;
                     i += 1;
                 }
-                // Solo es math si HAY cierre; un `$` suelto (precio) no apaga el resto.
-                if let Some(close) = find_closing(&cs, i, '$', run) {
-                    ranges.push((start, close));
-                    i = close;
+                // Math solo si el contenido NO empieza ni termina con espacio (estilo
+                // CommonMark-math): asi "$5 y vale $7" (precios) NO se confunde con math
+                // y no se silencian errores entre dos signos `$` (review M6).
+                let opens = i < n && !cs[i].is_whitespace();
+                if opens {
+                    if let Some(close) = find_math_close(&cs, i, run) {
+                        ranges.push((start, close));
+                        i = close;
+                    }
                 }
             }
             ']' if i + 1 < n && cs[i + 1] == '(' => {
@@ -183,6 +204,30 @@ fn find_closing(cs: &[char], from: usize, delim: char, min: usize) -> Option<usi
                 k += 1;
             }
             if r >= min {
+                return Some(k);
+            }
+            j = k;
+        } else {
+            j += 1;
+        }
+    }
+    None
+}
+
+/// Como `find_closing` pero para math: el char antes de la corrida de cierre NO puede
+/// ser espacio (estilo CommonMark-math), asi el `$` de un precio no cierra el de otro.
+fn find_math_close(cs: &[char], from: usize, min: usize) -> Option<usize> {
+    let n = cs.len();
+    let mut j = from;
+    while j < n {
+        if cs[j] == '$' {
+            let mut k = j;
+            let mut r = 0usize;
+            while k < n && cs[k] == '$' {
+                r += 1;
+                k += 1;
+            }
+            if r >= min && j > from && !cs[j - 1].is_whitespace() {
                 return Some(k);
             }
             j = k;
@@ -344,6 +389,28 @@ mod tests {
         let r = SpellChecker::check_text(&dict, "cuesta $5 zzz pesos", false);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].word, "zzz");
+    }
+
+    #[test]
+    fn two_price_dollars_do_not_swallow_between() {
+        // "$5 y vale $7": el 2do '$' NO cierra el 1ro (espacio antes) -> no es math,
+        // y las palabras entre los precios SI se chequean (review M6).
+        let dict = FakeDict::new(&["cuesta", "y", "vale", "pesos"]);
+        let r = SpellChecker::check_text(&dict, "cuesta $5 y vale $7 zzz pesos", false);
+        assert_eq!(r.len(), 1, "solo 'zzz' (lo de entre precios no se silencia)");
+        assert_eq!(r[0].word, "zzz");
+    }
+
+    #[test]
+    fn nfd_accent_keeps_word_whole() {
+        // "camión" DESCOMPUESTO (NFD): c a m i o U+0301 n = 7 chars. La marca combinante
+        // no debe partir la palabra (review M6).
+        let nfd = "camio\u{0301}n";
+        let dict = FakeDict::new(&[]);
+        let r = SpellChecker::check_text(&dict, nfd, false);
+        assert_eq!(r.len(), 1, "UNA palabra, no fragmentada en 'camio' + 'n'");
+        assert_eq!(r[0].word, nfd);
+        assert_eq!((r[0].from, r[0].to), (0, 7));
     }
 
     #[test]

@@ -25,10 +25,17 @@ const setSpellSpans = StateEffect.define<Misspelling[]>();
 const spellMark = Decoration.mark({ class: "cm-spell-error" });
 
 function buildDecorations(spans: Misspelling[]): DecorationSet {
-  // RangeSetBuilder exige orden ascendente por `from` y rangos validos.
-  const sorted = spans.filter((s) => s.from < s.to).sort((a, b) => a.from - b.from);
+  // RangeSetBuilder exige orden ascendente (from, luego to) y rangos NO solapados.
+  const sorted = spans
+    .filter((s) => s.from < s.to)
+    .sort((a, b) => a.from - b.from || a.to - b.to);
   const builder = new RangeSetBuilder<Decoration>();
-  for (const s of sorted) builder.add(s.from, s.to, spellMark);
+  let lastTo = -1;
+  for (const s of sorted) {
+    if (s.from < lastTo) continue; // descarta solapados (defensivo, p.ej. tras mapPos)
+    builder.add(s.from, s.to, spellMark);
+    lastTo = s.to;
+  }
   return builder.finish();
 }
 
@@ -104,6 +111,10 @@ function showSpellMenu(view: EditorView, span: Misspelling, x: number, y: number
     menu.appendChild(item);
   }
   document.body.appendChild(menu);
+  // Si el menu se sale del viewport, reposicionar hacia arriba/izquierda (review M6).
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, x - rect.width)}px`;
+  if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, y - rect.height)}px`;
   activeMenu = menu;
   // En captura y diferido para no atrapar el mismo gesto que abrio el menu.
   setTimeout(() => {
@@ -124,8 +135,14 @@ const spellContextMenu = EditorView.domEventHandlers({
   },
 });
 
+// Cierra el menu de sugerencias ante CUALQUIER cambio del documento (tipear, etc.):
+// evita que quede flotando con coordenadas viejas que corromperian el texto (review M6).
+const closeMenuOnEdit = EditorView.updateListener.of((u) => {
+  if (u.docChanged) closeSpellMenu();
+});
+
 /// Extension a montar en el EditorView.
-export const spellcheckExtension: Extension = [spellField, spellContextMenu];
+export const spellcheckExtension: Extension = [spellField, spellContextMenu, closeMenuOnEdit];
 
 /// Pide el chequeo al backend y aplica los spans. `focusMode` lo corto-circuita en Rust.
 /// Spellcheck NO es critico: si falla (dict no cargado aun) se ignora en silencio.
@@ -134,9 +151,15 @@ export async function requestSpellCheck(
   text: string,
   focusMode: boolean,
 ): Promise<void> {
+  const sentDoc = view.state.doc; // el resultado vale para ESTE doc
   try {
     const spans = await invoke<Misspelling[]>("spellcheck", { text, focusMode });
-    view.dispatch({ effects: setSpellSpans.of(spans) });
+    // Si el doc cambio mientras volaba el IPC, los offsets quedaron viejos -> DESCARTAR
+    // (el debounce ya programo un chequeo fresco; las ondulitas previas, ya mapeadas, se
+    // siguen mostrando). El doc es inmutable: cambia de instancia en cada edicion.
+    if (view.state.doc === sentDoc) {
+      view.dispatch({ effects: setSpellSpans.of(spans) });
+    }
   } catch {
     /* no critico */
   }
