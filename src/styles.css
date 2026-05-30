@@ -1,5 +1,18 @@
 :root {
   color-scheme: light dark;
+  /* Paleta Adwaita-ish (M3). M5 la extiende a un selector de tema light/dark/sepia. */
+  --accent: #3584e4; /* azul Adwaita */
+  --editor-fg: #2e3436; /* texto del editor (light) */
+  --selection: rgba(53, 132, 228, 0.22);
+  --active-line: rgba(53, 132, 228, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --editor-fg: #deddda;
+    --selection: rgba(53, 132, 228, 0.35);
+    --active-line: rgba(255, 255, 255, 0.04);
+  }
 }
 
 * {
@@ -47,16 +60,17 @@ body {
   min-height: 0;
 }
 
+/* Host de CodeMirror 6: la tipografia/padding/colores los pone el tema del editor
+   (editorTheme en main.ts). Aca solo el layout para que CM6 llene la columna y
+   scrollee bien dentro del grid. */
 .editor {
-  border: 0;
-  resize: none;
-  padding: 1rem;
-  font-family: "JetBrains Mono Variable", "Cascadia Code", ui-monospace, monospace;
-  font-size: 14px;
-  line-height: 1.6;
-  outline: none;
-  background: transparent;
-  color: inherit;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor .cm-editor {
+  height: 100%;
 }
 
 .preview {
