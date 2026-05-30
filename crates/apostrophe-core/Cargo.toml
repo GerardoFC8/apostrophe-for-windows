@@ -10,6 +10,10 @@ authors = ["Gerardo Franco"]
 # que NO usan lookaround y portan directo. CHARACTERS y PARAGRAPHS se implementan
 # imperativamente (usan lookahead que este crate no soporta; ver docs/upstream-reference).
 regex = "1"
+# fancy-regex: motor backtracking (lookbehind/lookahead/backreferences) para portar
+# 1:1 los regex de markup de Apostrophe; el crate `regex` no los soporta. Mismo perfil
+# que el modulo `regex` de Python del upstream. Riesgo ReDoS mitigado off-thread (ADR).
+fancy-regex = "0.14"
 # serde OPCIONAL: el dominio es puro por defecto (no lo arrastra). Solo el adaptador
 # (src-tauri) activa el feature `serde` para serializar Stats/ReadTime al cruzar el IPC.
 serde = { version = "1", features = ["derive"], optional = true }

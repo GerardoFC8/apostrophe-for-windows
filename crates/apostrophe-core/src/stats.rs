@@ -12,10 +12,9 @@
 //!   `(?=\n{2,}|\Z)` que el crate `regex` no soporta).
 //! - READ_TIME: aritmetica f64 truncada (200 wpm).
 //!
-//! ALCANCE: este modulo cuenta sobre TEXTO PLANO. El PASO 0 del pipeline original
-//! (stripping de markdown previo al conteo) depende de `markup_regex.py` y se
-//! incorpora junto al modulo de markup/highlighting. La limpieza es idempotente
-//! sobre texto sin sintaxis markdown, por lo que el conteo puro es testeable solo.
+//! PIPELINE: `count` replica `do_count` del upstream: PASO 0 limpia el markup
+//! (`markup::strip`) y luego cuenta sobre el texto plano resultante. El stripping
+//! es idempotente sobre texto sin markdown.
 
 use std::sync::LazyLock;
 
@@ -55,14 +54,17 @@ pub struct Stats {
     pub read_time: ReadTime,
 }
 
-/// Cuenta las estadisticas de `text` (asumido texto plano, sin markdown).
+/// Cuenta las estadisticas de `text`. Replica `do_count` del upstream: primero
+/// limpia el markup (PASO 0, [`crate::markup::strip`]) y luego cuenta sobre el
+/// texto plano resultante.
 pub fn count(text: &str) -> Stats {
-    let words = count_words(text);
+    let plain = crate::markup::strip(text);
+    let words = count_words(&plain);
     Stats {
-        characters: count_characters(text),
+        characters: count_characters(&plain),
         words,
-        sentences: count_sentences(text),
-        paragraphs: count_paragraphs(text),
+        sentences: count_sentences(&plain),
+        paragraphs: count_paragraphs(&plain),
         read_time: read_time(words),
     }
 }
@@ -328,6 +330,53 @@ mod tests {
                 paragraphs: 2,
                 read_time: rt(0, 0, 1), // 4 palabras -> 4/200*60 = 1.2s -> trunc 1s
             }
+        );
+    }
+
+    #[test]
+    fn count_strips_markdown_before_counting() {
+        // Valores del oraculo COUNT POST-STRIP (tools/oracle/strip_oracle.py): count()
+        // debe limpiar el markup ANTES de contar, igual que do_count del upstream.
+        let bold = count("**hello**");
+        assert_eq!(
+            (bold.characters, bold.words, bold.sentences, bold.paragraphs),
+            (5, 1, 0, 1),
+            "los ** no cuentan"
+        );
+
+        let header = count("# Title");
+        assert_eq!(
+            (header.characters, header.words),
+            (5, 1),
+            "el # y el espacio no cuentan"
+        );
+
+        let link = count("[click](http://x.com)");
+        assert_eq!(
+            (link.characters, link.words),
+            (5, 1),
+            "solo el texto del link"
+        );
+
+        let img = count("![alt](http://x.com/i.png)");
+        assert_eq!((img.characters, img.words), (3, 1));
+
+        let sentence = count("Esto es **muy** importante.");
+        assert_eq!(
+            (sentence.characters, sentence.words, sentence.sentences),
+            (23, 4, 1)
+        );
+
+        // El codigo inline NO se strippea (CODE no esta en REPLACE): los backticks cuentan.
+        let code = count("`code`");
+        assert_eq!((code.characters, code.words), (6, 1));
+
+        let doc = count(
+            "# Titulo\n\nParrafo con **negrita**, *italica* y [un link](http://x.com).\n\n- item uno\n- item dos\n\n> cita final.",
+        );
+        assert_eq!(
+            (doc.characters, doc.words, doc.sentences, doc.paragraphs),
+            (72, 13, 4, 3)
         );
     }
 }
