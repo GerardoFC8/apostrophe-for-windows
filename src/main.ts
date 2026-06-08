@@ -78,37 +78,43 @@ document.querySelector("#win-close")?.addEventListener("click", () => void appWi
 
 // M8.1: guard anti-perdida al CERRAR la ventana. Cubre las 3 vías de cierre: botón X
 // (que llama appWindow.close() -> dispara este evento), Alt+F4 y cerrar desde la barra
-// de tareas. En Tauri v2 el handler puede ser async y llamar preventDefault() DESPUÉS
-// del await (patrón oficial): si NO se previene, la ventana cierra al resolver el
-// handler. confirm_close sincroniza el texto actual (los últimos tecleos, antes del
-// debounce) y confirma si hay cambios sin guardar.
-// `closing` colapsa disparos REENTRANTES: el diálogo nativo no es modal (el JS event
-// loop sigue vivo durante el await), así que un segundo X / Alt+F4 mientras el diálogo
-// está abierto re-dispararía el evento. Sin el flag, un "Cancelar" en el primer diálogo
-// podría quedar anulado por un "Descartar" en uno apilado. Con el flag, solo el primer
-// diálogo decide; los reentrantes se previenen. El flag se resetea SOLO al cancelar o
-// fallar (la ventana sigue viva); en el camino de éxito queda puesto porque la ventana
-// se destruye al resolver el handler.
-let closing = false;
+// de tareas.
+//
+// SIEMPRE prevenimos el cierre y lo controlamos nosotros: tras confirmar, cerramos con
+// appWindow.destroy() EXPLÍCITO. (Antes dependíamos del destroy IMPLÍCITO del wrapper de
+// Tauri —cierra al no prevenir—, pero ese camino llama a window|destroy, que necesita el
+// permiso core:window:allow-destroy; sin él la ventana quedaba trabada sin cerrar.) El
+// destroy explícito hace el cierre determinista; destroy() NO re-dispara onCloseRequested,
+// así que no hay loop.
+//
+// `closeInProgress` colapsa disparos REENTRANTES: el diálogo nativo no es modal (el JS
+// event loop sigue vivo durante el await), así que un segundo X / Alt+F4 mientras el
+// diálogo está abierto re-dispararía el evento; solo el primer diálogo decide.
+let closeInProgress = false;
 void appWindow.onCloseRequested(async (event) => {
-  if (closing) {
-    event.preventDefault(); // ya hay un diálogo de cierre decidiendo: no apilar otro
-    return;
-  }
-  closing = true;
+  event.preventDefault(); // tomamos el control del cierre (evita el destroy implícito de Tauri)
+  if (closeInProgress) return; // ya hay un diálogo decidiendo: no apilar otro
+  closeInProgress = true;
+  let proceed = false;
   try {
-    const proceed = await invoke<boolean>("confirm_close", { text: getText() });
-    if (!proceed) {
-      event.preventDefault(); // el usuario canceló: la ventana NO se cierra
-      closing = false; // permitir un futuro intento de cierre
-    }
-    // proceed === true: NO reseteamos `closing`; la ventana se destruye al resolver.
+    proceed = await invoke<boolean>("confirm_close", { text: getText() });
   } catch {
     // ante un error en el chequeo NO cerramos silenciosamente (podríamos perder datos):
-    // prevenimos el cierre y lo hacemos VISIBLE para que el usuario guarde a mano.
-    event.preventDefault();
-    closing = false;
+    // dejamos la ventana abierta y lo hacemos VISIBLE para que el usuario guarde a mano.
     flashStatus("no se pudo verificar los cambios — guarda con Ctrl+S antes de cerrar", 4000);
+    closeInProgress = false;
+    return;
+  }
+  if (proceed) {
+    try {
+      await appWindow.destroy(); // cierre forzado y explícito (no re-dispara onCloseRequested)
+    } catch {
+      // si el cierre fallara, no dejar la ventana trabada: permitir reintentar.
+      closeInProgress = false;
+      flashStatus("no se pudo cerrar la ventana — reintenta", 4000);
+    }
+  } else {
+    closeInProgress = false; // el usuario canceló: permitir un futuro intento de cierre
   }
 });
 
@@ -544,7 +550,7 @@ void (async () => {
 // Guard de cierre: si ya estamos cerrando, no re-escribir el snapshot que confirm_close
 // va a borrar (evita la race entre el tick y el borrado de confirm_close).
 void listen("autosave-tick", () => {
-  if (closing) return;
+  if (closeInProgress) return;
   void invoke("write_snapshot", { text: getText() }).catch(() => {});
 });
 
