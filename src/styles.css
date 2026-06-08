@@ -288,6 +288,94 @@ body {
   gap: 0.4rem;
 }
 
+/* M7: panel de busqueda/reemplazo de @codemirror/search. Usa las CSS vars del tema
+   para integrarse visualmente con el editor. El panel aparece en la parte superior
+   (search({ top: true })), separado del contenido por un borde sutil. */
+
+/* Contenedor general de paneles de CM6 (incluye el panel de busqueda). */
+.cm-panels {
+  background: var(--bg) !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-top: none !important;
+}
+
+/* Panel de busqueda en si. */
+.cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  color: var(--chrome-fg);
+}
+
+/* Campos de texto: Buscar y Reemplazar. */
+.cm-search .cm-textfield {
+  height: 24px;
+  padding: 0 0.45rem;
+  background: var(--bg);
+  color: var(--editor-fg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  outline: none;
+  min-width: 140px;
+  transition: border-color 120ms ease;
+}
+
+.cm-search .cm-textfield:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.18);
+}
+
+/* Botones del panel: siguiente, anterior, todo, reemplazar, reemplazar todo, cerrar. */
+.cm-search .cm-button {
+  height: 24px;
+  padding: 0 0.55rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: default;
+  transition: background 100ms ease;
+}
+
+.cm-search .cm-button:hover {
+  background: var(--hover);
+}
+
+.cm-search .cm-button:active {
+  background: var(--selection);
+}
+
+/* Etiquetas de opciones (distinguir mayusculas, expresion regular, palabra completa). */
+.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: default;
+  user-select: none;
+}
+
+/* Boton de cerrar el panel (x a la derecha). */
+.cm-search button[name="close"],
+.cm-search button.cm-button[name="close"] {
+  margin-left: auto;
+  border: none;
+  opacity: 0.65;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.cm-search button[name="close"]:hover,
+.cm-search button.cm-button[name="close"]:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
 /* Spellcheck (M6): ondulita roja bajo palabras mal escritas + menu de sugerencias. */
 .cm-spell-error {
   text-decoration: underline wavy #e01b24;
