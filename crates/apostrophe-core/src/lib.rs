@@ -15,5 +15,6 @@ pub mod convert;
 pub mod document;
 pub mod encoding;
 pub mod markup;
+pub mod snapshot;
 pub mod spellcheck;
 pub mod stats;

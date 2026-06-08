@@ -448,20 +448,48 @@ void listen("spell-dict-ready", () => {
   void requestSpellCheck(view, getText(), isFocusMode());
 });
 
-// --- Capa B: apertura via asociacion de archivo (.md) ---
-// Arranque en frio (app cerrada + doble-click en un .md): Windows pasa el path en argv
-// y Rust lo dejo "pendiente". Lo pedimos al iniciar y lo cargamos en el editor (vacio).
+// M8.4a: contrato del snapshot restaurado (espejo de RestoredSnapshot de Rust).
+interface RestoredSnapshot {
+  content: string;
+  original_file_name: string | null;
+}
+
+// --- Capa B + M8.4a: arranque ---
+// Orden de precedencia: (1) take_pending_file (asociacion .md), (2) take_pending_restore
+// (snapshot de crash). Si se abrio via asociacion de archivo, el snapshot NO se restaura.
 void (async () => {
   try {
     const pending = await invoke<OpenedDoc | null>("take_pending_file");
     if (pending) {
+      // Apertura via asociacion de archivo: el pending file gana; no restaurar snapshot.
       setEditorText(pending.content);
       updateTitlebar(pending.file_name, false);
+      return;
+    }
+
+    // Sin pending file: verificar si hay un snapshot de una sesion anterior (crash).
+    const restored = await invoke<RestoredSnapshot | null>("take_pending_restore");
+    if (restored) {
+      setEditorText(restored.content);
+      // Marcar como modificado de inmediato (el store arranca vacio; el debounce lo
+      // marcaria en el primer cambio, pero queremos el indicador visible desde ya).
+      updateTitlebar(restored.original_file_name ?? null, true);
+      flashStatus("Se restauró trabajo no guardado de la sesión anterior", 5000);
     }
   } catch {
     /* no critico: si falla, la app queda con el editor vacio */
   }
 })();
+
+// M8.4a: autosave por snapshots. Cada tick (cada 5 s, emitido por Rust) envia el texto
+// actual al backend para que evalúe si debe escribir o borrar el snapshot. Silencioso:
+// el autosave no es critico y no debe interrumpir al usuario con mensajes de error.
+// Guard de cierre: si ya estamos cerrando, no re-escribir el snapshot que confirm_close
+// va a borrar (evita la race entre el tick y el borrado de confirm_close).
+void listen("autosave-tick", () => {
+  if (closing) return;
+  void invoke("write_snapshot", { text: getText() }).catch(() => {});
+});
 
 // App YA abierta + doble-click en otro .md: single-instance reenvia el path via este
 // evento. open_path aplica el guard anti-perdida (confirma si hay cambios sin guardar).

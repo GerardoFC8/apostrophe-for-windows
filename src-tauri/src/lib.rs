@@ -4,9 +4,11 @@
 //
 // M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado.
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+// M8.4a: autosave por snapshots en app_local_data_dir()/snapshots.
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use apostrophe_core::document::DocumentStore;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
@@ -256,23 +258,41 @@ async fn open_path(
 /// M8.1: confirma el cierre de la ventana si hay cambios sin guardar. La invoca el
 /// handler `onCloseRequested` del frontend. Sincroniza PRIMERO el texto actual del
 /// editor: el debounce de `set_content` puede estar hasta 250ms atrasado, y sin esto
-/// teclear-y-cerrar de inmediato perdería esos últimos tecleos sin avisar. Devuelve
-/// `true` si se puede cerrar (no había cambios o el usuario eligió descartar).
+/// teclear-y-cerrar de inmediato perderia esos ultimos tecleos sin avisar. Devuelve
+/// `true` si se puede cerrar (no habia cambios o el usuario eligio descartar).
+///
+/// M8.4a: si se procede con el cierre (limpio o descarte), borra el snapshot de sesion
+/// para que un arranque posterior no lo restaure espuriamente.
 #[tauri::command]
 async fn confirm_close(
     app: tauri::AppHandle,
     text: String,
     doc: tauri::State<'_, Doc>,
+    session: tauri::State<'_, SnapshotSession>,
 ) -> Result<bool, String> {
     doc.lock().unwrap().set_content(text);
-    confirm_discard_if_dirty(
+    let proceed = confirm_discard_if_dirty(
         &app,
         &doc,
         "¿Cerrar sin guardar?",
         "El documento tiene cambios que se perderán.",
         "Descartar y cerrar",
     )
-    .await
+    .await?;
+
+    if proceed {
+        // Cierre limpio o descartado: marcar la sesion como cerrando ANTES de borrar el
+        // snapshot para anular cualquier write_snapshot en vuelo que cruce el .await.
+        session.closing.store(true, Ordering::SeqCst);
+        let id = session.id.clone();
+        if let Ok(dir) = snapshots_dir(&app) {
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                delete_snapshot_files(&dir, &id);
+            })
+            .await;
+        }
+    }
+    Ok(proceed)
 }
 
 /// M8.1: documento nuevo (Ctrl+N). Sincroniza el texto actual, confirma descarte si hay
@@ -311,20 +331,34 @@ async fn save_document(
     app: tauri::AppHandle,
     text: String,
     doc: tauri::State<'_, Doc>,
+    session: tauri::State<'_, SnapshotSession>,
 ) -> Result<Option<DocStatus>, String> {
     let existing = doc.lock().unwrap().path().cloned();
     let Some(path) = existing else {
-        return save_document_as(app, text, doc).await;
+        return save_document_as(app, text, doc, session).await;
     };
     std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
-    // Actualizacion de estado atomica bajo un solo lock (set_content + mark_clean).
-    let mut store = doc.lock().unwrap();
-    store.set_content(text);
-    store.mark_clean();
-    Ok(Some(DocStatus {
-        file_name: store.file_name(),
-        dirty: false,
-    }))
+    // Lock BREVE (patron M4): set_content + mark_clean bajo un bloque acotado para que
+    // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
+    let status = {
+        let mut store = doc.lock().unwrap();
+        store.set_content(text);
+        store.mark_clean();
+        DocStatus {
+            file_name: store.file_name(),
+            dirty: false,
+        }
+    }; // guard se suelta aqui
+    // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente para no
+    // restaurar contenido ya guardado si hay un crash en los proximos segundos (best-effort).
+    if let Ok(dir) = snapshots_dir(&app) {
+        let id = session.id.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            delete_snapshot_files(&dir, &id);
+        })
+        .await;
+    }
+    Ok(Some(status))
 }
 
 /// Guardar como: siempre dialogo nativo (en spawn_blocking). Fija el path y marca limpio.
@@ -333,6 +367,7 @@ async fn save_document_as(
     app: tauri::AppHandle,
     text: String,
     doc: tauri::State<'_, Doc>,
+    session: tauri::State<'_, SnapshotSession>,
 ) -> Result<Option<DocStatus>, String> {
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -352,13 +387,26 @@ async fn save_document_as(
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
     std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
-    let mut store = doc.lock().unwrap();
-    store.set_content(text);
-    store.saved_as(path);
-    Ok(Some(DocStatus {
-        file_name: store.file_name(),
-        dirty: false,
-    }))
+    // Lock BREVE (patron M4): saved_as + set_content bajo un bloque acotado para que
+    // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
+    let status = {
+        let mut store = doc.lock().unwrap();
+        store.set_content(text);
+        store.saved_as(path);
+        DocStatus {
+            file_name: store.file_name(),
+            dirty: false,
+        }
+    }; // guard se suelta aqui
+    // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente (best-effort).
+    if let Ok(dir) = snapshots_dir(&app) {
+        let id = session.id.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            delete_snapshot_files(&dir, &id);
+        })
+        .await;
+    }
+    Ok(Some(status))
 }
 
 /// Exporta el markdown a un archivo HTML elegido por el usuario (dialogo nativo).
@@ -481,6 +529,167 @@ fn load_dictionary(app: &tauri::AppHandle) {
     });
 }
 
+// --- M8.4a: autosave por snapshots ---
+// El snapshot se escribe en app_local_data_dir()/snapshots/ (no roaming). Un snapshot
+// por sesion (el session id es un uuid v4 que se genera en run() y se mantiene toda la
+// sesion). Si hay un snapshot huerfano al arrancar (crash), se restaura en el frontend.
+// El .md real del usuario NUNCA se toca: el snapshot es un respaldo paralelo.
+
+/// Id unico de esta sesion (uuid v4): nombra el snapshot de autosave. Se genera una
+/// vez en run() y se reusa todo el tiempo (un snapshot por sesion, se sobreescribe).
+/// `closing` es seteado por confirm_close justo antes de borrar el snapshot, para
+/// anular cualquier write_snapshot en vuelo que ya haya pasado el guard del frontend.
+struct SnapshotSession {
+    id: String,
+    closing: AtomicBool,
+}
+
+/// Snapshot huerfano de una sesion anterior (crash) detectado al arrancar, para que el
+/// frontend lo restaure. Espejo del patron PendingFile.
+struct PendingRestore(Mutex<Option<RestoredSnapshot>>);
+
+/// Contenido y metadatos de un snapshot huerfano listo para restaurar en el editor.
+#[derive(serde::Serialize, Clone)]
+struct RestoredSnapshot {
+    content: String,
+    /// Nombre del archivo original si lo habia (para el aviso), o None.
+    original_file_name: Option<String>,
+}
+
+/// Devuelve (y crea si no existe) el directorio de snapshots bajo app_local_data_dir.
+fn snapshots_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("no se pudo resolver app_local_data_dir: {e}"))?
+        .join("snapshots");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("no se pudo crear el dir de snapshots: {e}"))?;
+    Ok(dir)
+}
+
+/// Escribe el archivo de contenido (.snapshot) y el de metadata (.meta.json) para un id.
+fn write_snapshot_files(
+    dir: &Path,
+    id: &str,
+    content: &str,
+    original_path: Option<PathBuf>,
+) -> Result<(), String> {
+    let snap_path = dir.join(apostrophe_core::snapshot::snapshot_file_name(id));
+    std::fs::write(&snap_path, content.as_bytes())
+        .map_err(|e| format!("no se pudo escribir el snapshot: {e}"))?;
+
+    let saved_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    let meta = apostrophe_core::snapshot::SnapshotMeta { original_path, saved_at };
+    let meta_json =
+        serde_json::to_string(&meta).map_err(|e| format!("no se pudo serializar metadata: {e}"))?;
+    let meta_path = dir.join(apostrophe_core::snapshot::meta_file_name(id));
+    std::fs::write(&meta_path, meta_json.as_bytes())
+        .map_err(|e| format!("no se pudo escribir la metadata del snapshot: {e}"))?;
+    Ok(())
+}
+
+/// Borra el snapshot y la metadata de un id (best-effort: ignora si no existen).
+fn delete_snapshot_files(dir: &Path, id: &str) {
+    let _ = std::fs::remove_file(dir.join(apostrophe_core::snapshot::snapshot_file_name(id)));
+    let _ = std::fs::remove_file(dir.join(apostrophe_core::snapshot::meta_file_name(id)));
+}
+
+/// Busca el snapshot mas reciente en el dir (huerfano de una sesion anterior). Devuelve
+/// el contenido y, opcionalmente, el nombre del archivo original. Tolerante a archivos
+/// corruptos: los saltea sin propagarlos.
+fn find_latest_orphan(dir: &Path) -> Option<(String, RestoredSnapshot)> {
+    let entries = std::fs::read_dir(dir).ok()?;
+
+    let mut best: Option<(u64, String, apostrophe_core::snapshot::SnapshotMeta)> = None;
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let Some(id) = apostrophe_core::snapshot::parse_snapshot_id(&file_name) else {
+            continue; // no es un .snapshot -> saltar
+        };
+        let meta_path = dir.join(apostrophe_core::snapshot::meta_file_name(id));
+        let Ok(meta_bytes) = std::fs::read(&meta_path) else { continue };
+        let Ok(meta) = serde_json::from_slice::<apostrophe_core::snapshot::SnapshotMeta>(&meta_bytes)
+        else {
+            continue; // metadata corrupta -> saltar
+        };
+        if best.as_ref().is_none_or(|(t, _, _)| meta.saved_at > *t) {
+            best = Some((meta.saved_at, id.to_owned(), meta));
+        }
+    }
+
+    let (_, id, meta) = best?;
+    let snap_path = dir.join(apostrophe_core::snapshot::snapshot_file_name(&id));
+    let content = std::fs::read_to_string(&snap_path).ok()?;
+
+    let original_file_name = meta
+        .original_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+
+    Some((id, RestoredSnapshot { content, original_file_name }))
+}
+
+/// Escribe (o borra) el snapshot de la sesion segun la politica de should_snapshot.
+/// Lo invoca el frontend en cada tick del timer de autosave.
+#[tauri::command]
+async fn write_snapshot(
+    app: tauri::AppHandle,
+    text: String,
+    doc: tauri::State<'_, Doc>,
+    session: tauri::State<'_, SnapshotSession>,
+) -> Result<(), String> {
+    // Guard de cierre: si confirm_close ya seto la bandera, no re-escribir el snapshot
+    // que fue (o sera) borrado por confirm_close (anula writes en vuelo).
+    if session.closing.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    // Lock BREVE: leer dirty + path, soltar ANTES de tocar disco (no cruzar el .await).
+    let (dirty, path) = {
+        let s = doc.lock().unwrap();
+        (s.is_dirty(), s.path().cloned())
+    };
+    let id = session.id.clone();
+    let dir = snapshots_dir(&app)?;
+
+    if apostrophe_core::snapshot::should_snapshot(dirty, text.len()) {
+        tauri::async_runtime::spawn_blocking(move || write_snapshot_files(&dir, &id, &text, path))
+            .await
+            .map_err(|e| format!("error de autosave: {e}"))?
+    } else {
+        // Doc limpio o vacio: el .md real esta a salvo -> borrar el snapshot de sesion.
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            delete_snapshot_files(&dir, &id);
+        })
+        .await;
+        Ok(())
+    }
+}
+
+/// Devuelve (y limpia) el snapshot huerfano pendiente de restaurar, si lo hay.
+/// Espejo de take_pending_file.
+#[tauri::command]
+fn take_pending_restore(pending: tauri::State<'_, PendingRestore>) -> Option<RestoredSnapshot> {
+    pending.0.lock().unwrap().take()
+}
+
+/// Borra TODOS los archivos .snapshot y .meta.json del directorio (best-effort).
+/// Se llama al arrancar, despues de cargar el huerfano en memoria, para evitar que
+/// crashes multiples acumulen archivos indefinidamente.
+fn purge_snapshots_dir(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".snapshot") || name.ends_with(".meta.json") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 // --- Capa B: asociacion de archivos (.md) ---
 // En Windows el doble-click en un .md ejecuta `apostrophe.exe <ruta>`: el path llega
 // como ARGUMENTO de CLI. `RunEvent::Opened` NO se dispara en Windows (solo macOS/iOS/
@@ -546,12 +755,32 @@ pub fn run() {
         .manage(Mutex::new(DocumentStore::new()))
         .manage(SpellState(RwLock::new(None)))
         .manage(PendingFile(Mutex::new(None)))
+        // M8.4a: session id generado en run() para que este disponible en setup() sin mover.
+        .manage(SnapshotSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            closing: AtomicBool::new(false),
+        })
+        .manage(PendingRestore(Mutex::new(None)))
         .setup(|app| {
             load_dictionary(app.handle()); // carga el diccionario es en background
+
+            // M8.4a: restauracion de crash. Detectar snapshot huerfano de sesion anterior
+            // ANTES de procesar argv (el pending file tiene precedencia).
+            if let Ok(dir) = snapshots_dir(app.handle()) {
+                if let Some((_orphan_id, restored)) = find_latest_orphan(&dir) {
+                    *app.state::<PendingRestore>().0.lock().unwrap() = Some(restored);
+                }
+                // Barrer TODOS los snapshots y metadatos del arranque anterior (incluyendo
+                // el huerfano que acabamos de cargar en memoria, huerfanos de crashes
+                // anteriores y archivos con meta corrupta). La app esta arrancando: es
+                // seguro borrar todo; la sesion nueva generara su propio snapshot.
+                purge_snapshots_dir(&dir);
+            }
+
             // Capa B: arranque en frio via asociacion .md (app cerrada). Windows pasa el
             // path en argv; lo resolvemos a un OpenedDoc y lo dejamos pendiente para que
             // el frontend lo cargue al iniciar. Si falla (ruta invalida), se ignora y la
-            // app abre vacia.
+            // app abre vacia. El pending file tiene PRECEDENCIA sobre el restore.
             let argv: Vec<String> = std::env::args().collect();
             if let Some(path) = file_arg(&argv) {
                 let doc = app.state::<Doc>();
@@ -560,6 +789,18 @@ pub fn run() {
                     Err(e) => eprintln!("no se pudo abrir el archivo de inicio '{path}': {e}"),
                 }
             }
+
+            // M8.4a: timer de autosave. Emite "autosave-tick" cada 5 s para que el frontend
+            // invoque write_snapshot. Usa tauri::async_runtime::spawn (runtime de Tauri/tokio)
+            // y tokio::time::sleep para no bloquear ningun hilo.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let _ = handle.emit("autosave-tick", ());
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -574,7 +815,9 @@ pub fn run() {
             save_document_as,
             export_document,
             spellcheck,
-            take_pending_file
+            take_pending_file,
+            write_snapshot,
+            take_pending_restore
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
