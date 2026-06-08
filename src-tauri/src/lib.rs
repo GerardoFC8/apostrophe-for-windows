@@ -129,24 +129,37 @@ fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
     }
 }
 
-/// Guard anti-perdida (M4): si el doc tiene cambios sin guardar, pide confirmacion
-/// (dialogo nativo en spawn_blocking -> sin deadlock). Devuelve `true` si se puede
-/// proceder (no habia cambios, o el usuario eligio descartar). Reusado por open_document
-/// (dialogo) y open_path (asociacion de archivo, Capa B).
-async fn confirm_discard_if_dirty(app: &tauri::AppHandle, doc: &Doc) -> Result<bool, String> {
+/// Guard anti-perdida: si el doc tiene cambios sin guardar, pide confirmacion (dialogo
+/// nativo en spawn_blocking -> sin deadlock). Devuelve `true` si se puede proceder (no
+/// habia cambios, o el usuario eligio descartar). Reusado por open_document, open_path,
+/// confirm_close (M8.1) y new_document (M8.1) con su propio titulo, mensaje y label.
+///
+/// Patron GNOME: `title` = pregunta corta (encabezado), `message` = explicacion. NO
+/// repetir texto entre ambos: rfd usa el title como encabezado Y como titulo de ventana
+/// (en GTK lo muestra dos veces), asi que repetir la frase la duplica visualmente.
+async fn confirm_discard_if_dirty(
+    app: &tauri::AppHandle,
+    doc: &Doc,
+    title: &str,
+    message: &str,
+    confirm_label: &str,
+) -> Result<bool, String> {
     // El guard del Mutex se suelta al terminar el statement: NO se cruza el .await.
     let dirty = doc.lock().unwrap().is_dirty();
     if !dirty {
         return Ok(true);
     }
     let app2 = app.clone();
+    let title = title.to_string();
+    let message = message.to_string();
+    let confirm_label = confirm_label.to_string();
     let discard = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
-            .message("Tenés cambios sin guardar que se van a perder. ¿Abrir otro archivo igual?")
-            .title("Cambios sin guardar")
+            .message(message)
+            .title(title)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "Descartar y abrir".into(),
+                confirm_label,
                 "Cancelar".into(),
             ))
             .blocking_show()
@@ -182,7 +195,15 @@ async fn open_document(
     app: tauri::AppHandle,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc).await? {
+    if !confirm_discard_if_dirty(
+        &app,
+        &doc,
+        "¿Abrir otro archivo?",
+        "El documento actual tiene cambios que se perderán.",
+        "Descartar y abrir",
+    )
+    .await?
+    {
         return Ok(None); // el usuario cancelo: NO se pierde nada
     }
 
@@ -216,10 +237,69 @@ async fn open_path(
     path: String,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc).await? {
+    if !confirm_discard_if_dirty(
+        &app,
+        &doc,
+        "¿Abrir otro archivo?",
+        "El documento actual tiene cambios que se perderán.",
+        "Descartar y abrir",
+    )
+    .await?
+    {
         return Ok(None);
     }
     load_path_into_store(PathBuf::from(path), &doc).map(Some)
+}
+
+/// M8.1: confirma el cierre de la ventana si hay cambios sin guardar. La invoca el
+/// handler `onCloseRequested` del frontend. Sincroniza PRIMERO el texto actual del
+/// editor: el debounce de `set_content` puede estar hasta 250ms atrasado, y sin esto
+/// teclear-y-cerrar de inmediato perdería esos últimos tecleos sin avisar. Devuelve
+/// `true` si se puede cerrar (no había cambios o el usuario eligió descartar).
+#[tauri::command]
+async fn confirm_close(
+    app: tauri::AppHandle,
+    text: String,
+    doc: tauri::State<'_, Doc>,
+) -> Result<bool, String> {
+    doc.lock().unwrap().set_content(text);
+    confirm_discard_if_dirty(
+        &app,
+        &doc,
+        "¿Cerrar sin guardar?",
+        "El documento tiene cambios que se perderán.",
+        "Descartar y cerrar",
+    )
+    .await
+}
+
+/// M8.1: documento nuevo (Ctrl+N). Sincroniza el texto actual, confirma descarte si hay
+/// cambios sin guardar y, si se procede, resetea el store a documento nuevo vacío.
+/// Devuelve el nuevo estado para la titlebar, o `None` si el usuario canceló.
+#[tauri::command]
+async fn new_document(
+    app: tauri::AppHandle,
+    text: String,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<DocStatus>, String> {
+    doc.lock().unwrap().set_content(text);
+    if !confirm_discard_if_dirty(
+        &app,
+        &doc,
+        "¿Crear un documento nuevo?",
+        "El documento actual tiene cambios que se perderán.",
+        "Descartar y crear",
+    )
+    .await?
+    {
+        return Ok(None);
+    }
+    let mut store = doc.lock().unwrap();
+    store.reset();
+    Ok(Some(DocStatus {
+        file_name: store.file_name(),
+        dirty: store.is_dirty(),
+    }))
 }
 
 /// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
@@ -472,6 +552,8 @@ pub fn run() {
             set_content,
             open_document,
             open_path,
+            confirm_close,
+            new_document,
             save_document,
             save_document_as,
             export_document,

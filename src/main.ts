@@ -71,6 +71,42 @@ document.querySelector("#win-min")?.addEventListener("click", () => void appWind
 document.querySelector("#win-max")?.addEventListener("click", () => void appWindow.toggleMaximize());
 document.querySelector("#win-close")?.addEventListener("click", () => void appWindow.close());
 
+// M8.1: guard anti-perdida al CERRAR la ventana. Cubre las 3 vías de cierre: botón X
+// (que llama appWindow.close() -> dispara este evento), Alt+F4 y cerrar desde la barra
+// de tareas. En Tauri v2 el handler puede ser async y llamar preventDefault() DESPUÉS
+// del await (patrón oficial): si NO se previene, la ventana cierra al resolver el
+// handler. confirm_close sincroniza el texto actual (los últimos tecleos, antes del
+// debounce) y confirma si hay cambios sin guardar.
+// `closing` colapsa disparos REENTRANTES: el diálogo nativo no es modal (el JS event
+// loop sigue vivo durante el await), así que un segundo X / Alt+F4 mientras el diálogo
+// está abierto re-dispararía el evento. Sin el flag, un "Cancelar" en el primer diálogo
+// podría quedar anulado por un "Descartar" en uno apilado. Con el flag, solo el primer
+// diálogo decide; los reentrantes se previenen. El flag se resetea SOLO al cancelar o
+// fallar (la ventana sigue viva); en el camino de éxito queda puesto porque la ventana
+// se destruye al resolver el handler.
+let closing = false;
+void appWindow.onCloseRequested(async (event) => {
+  if (closing) {
+    event.preventDefault(); // ya hay un diálogo de cierre decidiendo: no apilar otro
+    return;
+  }
+  closing = true;
+  try {
+    const proceed = await invoke<boolean>("confirm_close", { text: getText() });
+    if (!proceed) {
+      event.preventDefault(); // el usuario canceló: la ventana NO se cierra
+      closing = false; // permitir un futuro intento de cierre
+    }
+    // proceed === true: NO reseteamos `closing`; la ventana se destruye al resolver.
+  } catch {
+    // ante un error en el chequeo NO cerramos silenciosamente (podríamos perder datos):
+    // prevenimos el cierre y lo hacemos VISIBLE para que el usuario guarde a mano.
+    event.preventDefault();
+    closing = false;
+    flashStatus("no se pudo verificar los cambios — guarda con Ctrl+S antes de cerrar", 4000);
+  }
+});
+
 // M4/M5: atajos de archivo a nivel WINDOW (no solo en CM6) — asi funcionan aunque el
 // foco NO este en el editor. Shift+S se chequea ANTES que S sola.
 window.addEventListener("keydown", (e) => {
@@ -88,6 +124,9 @@ window.addEventListener("keydown", (e) => {
   } else if (k === "e") {
     e.preventDefault();
     void exportDoc();
+  } else if (k === "n") {
+    e.preventDefault();
+    void newDoc();
   }
 });
 
@@ -296,6 +335,20 @@ async function syncDoc(): Promise<void> {
     updateTitlebar(st.file_name, st.dirty);
   } catch {
     /* no critico */
+  }
+}
+
+// M8.1: documento nuevo (Ctrl+N). El Rust confirma si hay cambios sin guardar antes de
+// descartar el documento actual.
+async function newDoc(): Promise<void> {
+  try {
+    const st = await invoke<DocStatus | null>("new_document", { text: getText() });
+    if (!st) return; // cancelado (el usuario eligió NO descartar)
+    setEditorText("");
+    updateTitlebar(st.file_name, st.dirty);
+    flashStatus("documento nuevo");
+  } catch (err) {
+    flashStatus(`error: ${String(err)}`, 4000);
   }
 }
 

@@ -52,6 +52,11 @@ impl DocumentStore {
         self.dirty = false;
     }
 
+    /// Vuelve al estado de documento nuevo: sin path, vacío, limpio. Caso "Nuevo" (Ctrl+N).
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
     pub fn path(&self) -> Option<&PathBuf> {
         self.path.as_ref()
     }
@@ -135,5 +140,18 @@ mod tests {
         assert_eq!(doc.path(), Some(&PathBuf::from("/tmp/nuevo.md")));
         assert!(!doc.is_dirty(), "guardar como limpia el dirty");
         assert_eq!(doc.file_name().as_deref(), Some("nuevo.md"));
+    }
+
+    #[test]
+    fn reset_vuelve_a_documento_nuevo() {
+        let mut doc = DocumentStore::new();
+        doc.open(PathBuf::from("/tmp/a.md"), "contenido".into());
+        doc.set_content("editado".into());
+        assert!(doc.is_dirty());
+        doc.reset();
+        assert_eq!(doc.path(), None);
+        assert_eq!(doc.content(), "");
+        assert!(!doc.is_dirty());
+        assert_eq!(doc.file_name(), None);
     }
 }
