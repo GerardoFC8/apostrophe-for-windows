@@ -4,6 +4,7 @@
 //
 // M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado.
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -128,32 +129,61 @@ fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
     }
 }
 
-/// Abre un .md. Si el documento actual tiene cambios sin guardar, CONFIRMA antes
-/// (anti-perdida de datos, review M4). `async` + dialogos en spawn_blocking.
+/// Guard anti-perdida (M4): si el doc tiene cambios sin guardar, pide confirmacion
+/// (dialogo nativo en spawn_blocking -> sin deadlock). Devuelve `true` si se puede
+/// proceder (no habia cambios, o el usuario eligio descartar). Reusado por open_document
+/// (dialogo) y open_path (asociacion de archivo, Capa B).
+async fn confirm_discard_if_dirty(app: &tauri::AppHandle, doc: &Doc) -> Result<bool, String> {
+    // El guard del Mutex se suelta al terminar el statement: NO se cruza el .await.
+    let dirty = doc.lock().unwrap().is_dirty();
+    if !dirty {
+        return Ok(true);
+    }
+    let app2 = app.clone();
+    let discard = tauri::async_runtime::spawn_blocking(move || {
+        app2.dialog()
+            .message("Tenés cambios sin guardar que se van a perder. ¿Abrir otro archivo igual?")
+            .title("Cambios sin guardar")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Descartar y abrir".into(),
+                "Cancelar".into(),
+            ))
+            .blocking_show()
+    })
+    .await
+    .map_err(|e| format!("error en el dialogo: {e}"))?;
+    Ok(discard)
+}
+
+/// Lee un .md de disco a un OpenedDoc y lo fija en el store. Unica fuente del flujo
+/// "leer archivo -> estado del documento", reusada por el dialogo (open_document), el
+/// arranque en frio (setup) y la apertura via asociacion (open_path).
+fn load_path_into_store(path: PathBuf, doc: &Doc) -> Result<OpenedDoc, String> {
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let path_str = path.to_string_lossy().into_owned();
+    doc.lock().unwrap().open(path, content.clone());
+    Ok(OpenedDoc {
+        path: path_str,
+        file_name,
+        content,
+    })
+}
+
+/// Abre un .md via DIALOGO nativo. Si el documento actual tiene cambios sin guardar,
+/// CONFIRMA antes (anti-perdida, review M4). `async` + dialogos en spawn_blocking.
 #[tauri::command]
 async fn open_document(
     app: tauri::AppHandle,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    // Guarda anti-perdida: si hay cambios sin guardar, pedir confirmacion.
-    if doc.lock().unwrap().is_dirty() {
-        let app2 = app.clone();
-        let discard = tauri::async_runtime::spawn_blocking(move || {
-            app2.dialog()
-                .message("Tenés cambios sin guardar que se van a perder. ¿Abrir otro archivo igual?")
-                .title("Cambios sin guardar")
-                .kind(MessageDialogKind::Warning)
-                .buttons(MessageDialogButtons::OkCancelCustom(
-                    "Descartar y abrir".into(),
-                    "Cancelar".into(),
-                ))
-                .blocking_show()
-        })
-        .await
-        .map_err(|e| format!("error en el dialogo: {e}"))?;
-        if !discard {
-            return Ok(None); // el usuario cancelo: NO se pierde nada
-        }
+    if !confirm_discard_if_dirty(&app, &doc).await? {
+        return Ok(None); // el usuario cancelo: NO se pierde nada
     }
 
     // Picker en un hilo de pool (NO en el main thread -> sin deadlock).
@@ -173,22 +203,23 @@ async fn open_document(
     let path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+    load_path_into_store(path, &doc).map(Some)
+}
 
-    // Datos para el frontend, tomados directo de lo ya leido (no re-derivar del store).
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let path_str = path.to_string_lossy().into_owned();
-
-    doc.lock().unwrap().open(path, content.clone());
-    Ok(Some(OpenedDoc {
-        path: path_str,
-        file_name,
-        content,
-    }))
+/// Capa B: abre un .md por RUTA (no por dialogo). Lo usa la apertura via asociacion
+/// de archivo cuando la app YA esta abierta: single-instance reenvia el path y el
+/// frontend invoca este comando. Aplica el mismo guard anti-perdida que open_document.
+/// Devuelve None si el usuario cancela.
+#[tauri::command]
+async fn open_path(
+    app: tauri::AppHandle,
+    path: String,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<OpenedDoc>, String> {
+    if !confirm_discard_if_dirty(&app, &doc).await? {
+        return Ok(None);
+    }
+    load_path_into_store(PathBuf::from(path), &doc).map(Some)
 }
 
 /// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
@@ -368,16 +399,71 @@ fn load_dictionary(app: &tauri::AppHandle) {
     });
 }
 
+// --- Capa B: asociacion de archivos (.md) ---
+// En Windows el doble-click en un .md ejecuta `apostrophe.exe <ruta>`: el path llega
+// como ARGUMENTO de CLI. `RunEvent::Opened` NO se dispara en Windows (solo macOS/iOS/
+// Android), por eso se lee de argv. Dos caminos:
+//  - app cerrada: setup() resuelve argv -> PendingFile; el frontend lo consume al cargar.
+//  - app abierta: single-instance reenvia el argv -> evento "open-file-path" al frontend.
+
+/// Extrae la ruta del archivo a abrir desde argv. Ignora argv[0] (el exe) y los flags
+/// (empiezan con '-'); devuelve la primera ruta "normal", o None. No valida existencia:
+/// el lector reporta un error legible si la ruta no se puede leer.
+fn file_arg(args: &[String]) -> Option<String> {
+    args.iter()
+        .skip(1)
+        .find(|a| !a.is_empty() && !a.starts_with('-'))
+        .cloned()
+}
+
+/// Archivo pendiente del ARRANQUE EN FRIO (asociacion .md con la app cerrada): se
+/// resuelve en setup() desde argv y el frontend lo consume (y limpia) al iniciar.
+struct PendingFile(Mutex<Option<OpenedDoc>>);
+
+/// Devuelve (y limpia) el archivo pendiente del arranque en frio, si lo hay. El frontend
+/// lo llama al iniciar para cargar el .md con el que se abrio la app.
+#[tauri::command]
+fn take_pending_file(pending: tauri::State<'_, PendingFile>) -> Option<OpenedDoc> {
+    pending.0.lock().unwrap().take()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // single-instance PRIMERO (requisito del plugin): si ya hay una instancia, la
+        // nueva (lanzada por Windows al abrir un .md) reenvia su argv y se cierra.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Traer el foco a la ventana existente.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_focus();
+            }
+            // Apertura via asociacion con la app YA abierta: emitir el path al frontend,
+            // que hace el open guardado (open_path). NO leemos el archivo aca: este
+            // callback corre en el event-loop y leer/dialogar podria bloquear (deadlock M4).
+            if let Some(path) = file_arg(&args) {
+                let _ = app.emit("open-file-path", path);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(DocumentStore::new()))
         .manage(SpellState(RwLock::new(None)))
+        .manage(PendingFile(Mutex::new(None)))
         .setup(|app| {
             load_dictionary(app.handle()); // carga el diccionario es en background
+            // Capa B: arranque en frio via asociacion .md (app cerrada). Windows pasa el
+            // path en argv; lo resolvemos a un OpenedDoc y lo dejamos pendiente para que
+            // el frontend lo cargue al iniciar. Si falla (ruta invalida), se ignora y la
+            // app abre vacia.
+            let argv: Vec<String> = std::env::args().collect();
+            if let Some(path) = file_arg(&argv) {
+                let doc = app.state::<Doc>();
+                match load_path_into_store(PathBuf::from(&path), &doc) {
+                    Ok(opened) => *app.state::<PendingFile>().0.lock().unwrap() = Some(opened),
+                    Err(e) => eprintln!("no se pudo abrir el archivo de inicio '{path}': {e}"),
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -385,11 +471,40 @@ pub fn run() {
             count_stats,
             set_content,
             open_document,
+            open_path,
             save_document,
             save_document_as,
             export_document,
-            spellcheck
+            spellcheck,
+            take_pending_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_arg;
+
+    #[test]
+    fn file_arg_devuelve_la_ruta_tras_el_exe() {
+        let args = vec!["apostrophe.exe".to_string(), "C:\\docs\\nota.md".to_string()];
+        assert_eq!(file_arg(&args).as_deref(), Some("C:\\docs\\nota.md"));
+    }
+
+    #[test]
+    fn file_arg_ignora_flags() {
+        let args = vec![
+            "apostrophe.exe".to_string(),
+            "--algun-flag".to_string(),
+            "nota.md".to_string(),
+        ];
+        assert_eq!(file_arg(&args).as_deref(), Some("nota.md"));
+    }
+
+    #[test]
+    fn file_arg_none_cuando_solo_esta_el_exe() {
+        let args = vec!["apostrophe.exe".to_string()];
+        assert_eq!(file_arg(&args), None);
+    }
 }

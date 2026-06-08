@@ -362,29 +362,12 @@ function scheduleUpdate(): void {
   }, DEBOUNCE_MS);
 }
 
-const SAMPLE = [
-  "# Apostrophe en Windows",
-  "",
-  "Editor **CodeMirror 6** nativo + pipeline **Rust → pandoc (sidecar) → WebView**.",
-  "",
-  "Atajos: `Ctrl+O` abrir · `Ctrl+S` guardar · `Ctrl+Shift+S` guardar como · `Ctrl+E` exportar.",
-  "",
-  "- ítem de lista",
-  "- soporte de `código` inline",
-  "",
-  "> Cita en bloque para verificar estilos.",
-  "",
-  "Ecuación inline (MathJax): $E = mc^2$",
-  "",
-  "```rust",
-  'fn main() { println!("hola, Apostrophe"); }',
-  "```",
-].join("\n");
-
 // CodeMirror 6: editor de verdad (undo/redo, line-wrap, cierre de brackets) SIN
 // gramatica Lezer (ADR-0001 D1). Los atajos de archivo van a nivel window (arriba).
+// Arranca VACIO (distraction-free): sin texto de ejemplo. Si la app se abre via
+// asociacion de archivo (.md), el contenido lo carga el arranque (ver mas abajo).
 const view = new EditorView({
-  doc: SAMPLE,
+  doc: "",
   parent: editorParent,
   extensions: [
     history(),
@@ -410,4 +393,33 @@ void updateStats();
 void requestSpellCheck(view, getText(), isFocusMode());
 void listen("spell-dict-ready", () => {
   void requestSpellCheck(view, getText(), isFocusMode());
+});
+
+// --- Capa B: apertura via asociacion de archivo (.md) ---
+// Arranque en frio (app cerrada + doble-click en un .md): Windows pasa el path en argv
+// y Rust lo dejo "pendiente". Lo pedimos al iniciar y lo cargamos en el editor (vacio).
+void (async () => {
+  try {
+    const pending = await invoke<OpenedDoc | null>("take_pending_file");
+    if (pending) {
+      setEditorText(pending.content);
+      updateTitlebar(pending.file_name, false);
+    }
+  } catch {
+    /* no critico: si falla, la app queda con el editor vacio */
+  }
+})();
+
+// App YA abierta + doble-click en otro .md: single-instance reenvia el path via este
+// evento. open_path aplica el guard anti-perdida (confirma si hay cambios sin guardar).
+void listen<string>("open-file-path", async (event) => {
+  try {
+    const opened = await invoke<OpenedDoc | null>("open_path", { path: event.payload });
+    if (!opened) return; // cancelado por el guard de cambios sin guardar
+    setEditorText(opened.content);
+    updateTitlebar(opened.file_name, false);
+    flashStatus("abierto");
+  } catch (err) {
+    flashStatus(`error al abrir: ${String(err)}`, 4000);
+  }
 });

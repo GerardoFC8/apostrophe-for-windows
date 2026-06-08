@@ -27,5 +27,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 # M4: dialogos nativos de abrir/guardar archivo.
 tauri-plugin-dialog = "2"
+# Capa B (asociacion .md): en Windows el doble-click en un .md lanza una instancia
+# NUEVA con el path en argv. single-instance la intercepta y reenvia el argv a la
+# instancia viva (evita ventanas duplicadas). Debe registrarse PRIMERO en el builder.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
