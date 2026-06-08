@@ -15,6 +15,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_window_state::StateFlags;
 
 /// Secuencia para nombrar temporales unicos por invocacion (evita choques entre
 /// previews concurrentes que dispara el debounce del frontend).
@@ -524,6 +525,20 @@ pub fn run() {
                 let _ = app.emit("open-file-path", path);
             }
         }))
+        // M8.2: recuerda la geometria de la ventana entre sesiones (restaura al crear la
+        // ventana, guarda al salir). Excluye DECORATIONS (la titlebar es custom,
+        // decorations:false -> restaurar el marco nativo daria doble barra) y VISIBLE (la
+        // ventana siempre debe mostrarse al arrancar). Solo geometria real.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE
+                        | StateFlags::POSITION
+                        | StateFlags::MAXIMIZED
+                        | StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

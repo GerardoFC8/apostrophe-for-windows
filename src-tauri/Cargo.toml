@@ -31,5 +31,8 @@ tauri-plugin-dialog = "2"
 # NUEVA con el path en argv. single-instance la intercepta y reenvia el argv a la
 # instancia viva (evita ventanas duplicadas). Debe registrarse PRIMERO en el builder.
 tauri-plugin-single-instance = "2"
+# M8.2: recuerda tamano/posicion/maximizado/fullscreen de la ventana entre sesiones.
+# Plugin oficial; auto-restaura al crear la ventana y auto-guarda al salir.
+tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
