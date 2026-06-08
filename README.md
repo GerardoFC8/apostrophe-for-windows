@@ -68,13 +68,27 @@ Definida en `src-tauri/tauri.conf.json` (`bundle`):
   comportamiento de "abrir con doble-click" se implementa en un slice aparte
   (requiere `tauri-plugin-single-instance` y se prueba en Windows).
 
-### Firma de código (diferida)
+### "Windows protegió tu PC" — es normal
 
-El instalador **no está firmado** todavía. Sin un certificado de firma de código,
-Windows SmartScreen puede mostrar una advertencia ("Windows protegió tu PC") al
-instalar — es esperable y no bloquea la instalación (clic en "Más información" →
-"Ejecutar de todas formas"). Para distribución pública, configurar
-[firma de código](https://v2.tauri.app/distribute/sign/windows/) con un certificado OV/EV.
+El instalador **no está firmado**, y es una decisión deliberada: este es un
+proyecto libre y personal, no comercial. Un certificado de firma de código cuesta
+~$200-400/año y no hace la app más segura ni mejor — solo le quita un clic de
+fricción a quien la descarga. No vale la pena para un hobby.
+
+Al instalar, Windows SmartScreen mostrará una pantalla azul: **"Windows protegió
+tu PC — Editor desconocido"**. Esto es **esperado y completamente inofensivo**: solo
+significa que Windows no reconoce al editor del binario, no que la app sea insegura.
+Para continuar:
+
+1. Clic en **"Más información"**.
+2. Clic en **"Ejecutar de todas formas"**.
+
+La app instala y funciona con normalidad. Así se distribuyen miles de aplicaciones
+open-source para Windows.
+
+> Si en el futuro quisieras eliminar la advertencia (p. ej. para distribución
+> masiva), haría falta un certificado OV/EV — ver
+> [firma de código en Tauri](https://v2.tauri.app/distribute/sign/windows/).
 
 ## Licencia
 
