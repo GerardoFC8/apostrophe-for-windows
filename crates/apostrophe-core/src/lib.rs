@@ -18,3 +18,4 @@ pub mod markup;
 pub mod snapshot;
 pub mod spellcheck;
 pub mod stats;
+pub mod watcher;

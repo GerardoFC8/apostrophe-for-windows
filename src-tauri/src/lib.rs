@@ -5,10 +5,17 @@
 // M2: pandoc paso de ser el binario del SISTEMA a un SIDECAR bundleado.
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
 // M8.4a: autosave por snapshots en app_local_data_dir()/snapshots.
+// M8.4b: watcher de cambios externos (notify-debouncer-full).
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use notify_debouncer_full::{
+    new_debouncer,
+    notify::{EventKind, RecursiveMode},
+    Debouncer, RecommendedCache,
+};
 
 use apostrophe_core::document::DocumentStore;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
@@ -104,6 +111,106 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
 // main thread queda libre para procesar el dialogo.
 
 type Doc = Mutex<DocumentStore>;
+
+// --- M8.4b: watcher de cambios externos ---
+// El Debouncer vive en managed state y se re-arma al abrir/guardar un archivo.
+// Se suspende (drop) alrededor de nuestros propios guardados para evitar el
+// auto-disparo. El handler solo traduce + emite: NUNCA toma locks del Doc ni
+// abre dialogos (gotcha anti-deadlock M4).
+
+/// Watcher del archivo abierto. Se re-arma al abrir/guardar-como (cambia el path) y
+/// se suspende+re-arma alrededor de nuestros propios guardados (evita el auto-disparo).
+struct FileWatcher(Mutex<Option<Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>>>);
+
+/// Suspende el watcher (lo dropea -> deja de observar). Se llama ANTES de un write
+/// propio para que notify no detecte nuestro guardado como cambio externo.
+fn suppress_watcher(state: &FileWatcher) {
+    *state.0.lock().unwrap() = None;
+}
+
+/// Traduce notify EventKind -> apostrophe_core::watcher::ChangeKind (dominio puro).
+/// Solo Modify(Data) y Modify(Name) son notificables; Modify(Metadata/Any/Other)
+/// son cambios de atributos/acceso sin cambio de contenido -> Other (no notificar).
+fn to_change_kind(kind: &EventKind) -> apostrophe_core::watcher::ChangeKind {
+    use apostrophe_core::watcher::ChangeKind;
+    use notify_debouncer_full::notify::event::ModifyKind;
+    match kind {
+        EventKind::Modify(ModifyKind::Data(_)) => ChangeKind::Modify,
+        EventKind::Modify(ModifyKind::Name(_)) => ChangeKind::Rename,
+        EventKind::Modify(_) => ChangeKind::Other, // metadata/any/other: no notificar
+        EventKind::Remove(_) => ChangeKind::Remove,
+        EventKind::Create(_) => ChangeKind::Modify, // crear en ruta vigilada = reemplazo
+        _ => ChangeKind::Other,
+    }
+}
+
+/// Arma (o re-arma) el watcher sobre el archivo actualmente abierto en el store.
+/// Sustituye el Debouncer anterior si lo habia (el drop del anterior detiene su hilo).
+/// Degrada con gracia si notify falla (log + sin watcher, no crashea).
+fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
+    use apostrophe_core::watcher::{is_relevant_change, should_notify_frontend};
+
+    // Leer el path bajo lock BREVE; soltarlo antes de crear el debouncer.
+    let path = {
+        let guard = doc.lock().unwrap();
+        guard.path().cloned()
+    };
+    let Some(path) = path else {
+        // Documento nuevo sin path: no hay archivo que observar.
+        let fw = app.state::<FileWatcher>();
+        suppress_watcher(&fw);
+        return;
+    };
+
+    let app_handle = app.clone();
+    let watched = path.clone();
+
+    let result = new_debouncer(
+        Duration::from_millis(500),
+        None,
+        move |result: notify_debouncer_full::DebounceEventResult| {
+            let events = match result {
+                Ok(evs) => evs,
+                Err(errs) => {
+                    for e in errs {
+                        eprintln!("watcher: error de notify: {e}");
+                    }
+                    return;
+                }
+            };
+            for debounced in events {
+                let kind = to_change_kind(&debounced.event.kind);
+                for event_path in &debounced.event.paths {
+                    if is_relevant_change(&watched, event_path)
+                        && should_notify_frontend(kind)
+                    {
+                        let _ = app_handle.emit("file-changed-on-disk", ());
+                        return; // un evento por batch es suficiente
+                    }
+                }
+            }
+        },
+    );
+
+    match result {
+        Ok(mut debouncer) => {
+            // Observar el archivo directamente (NonRecursive sobre su ruta).
+            if let Err(e) = debouncer.watch(&path, RecursiveMode::NonRecursive) {
+                eprintln!("watcher: no se pudo observar '{}': {e}", path.display());
+                // Degradar con gracia: sin watcher pero sin crash.
+                let fw = app.state::<FileWatcher>();
+                suppress_watcher(&fw);
+                return;
+            }
+            let fw = app.state::<FileWatcher>();
+            *fw.0.lock().unwrap() = Some(debouncer);
+        }
+        Err(e) => {
+            eprintln!("watcher: no se pudo crear el debouncer: {e}");
+            // Degradar con gracia.
+        }
+    }
+}
 
 /// Documento recien abierto que cruza al frontend.
 #[derive(serde::Serialize)]
@@ -228,7 +335,12 @@ async fn open_document(
     let path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
-    load_path_into_store(path, &doc).map(Some)
+    let result = load_path_into_store(path, &doc).map(Some);
+    // M8.4b: armar el watcher sobre el archivo recien abierto.
+    if result.is_ok() {
+        rewatch_doc(&app, &doc);
+    }
+    result
 }
 
 /// Capa B: abre un .md por RUTA (no por dialogo). Lo usa la apertura via asociacion
@@ -252,7 +364,12 @@ async fn open_path(
     {
         return Ok(None);
     }
-    load_path_into_store(PathBuf::from(path), &doc).map(Some)
+    let result = load_path_into_store(PathBuf::from(path), &doc).map(Some);
+    // M8.4b: armar el watcher sobre el archivo recien abierto por ruta.
+    if result.is_ok() {
+        rewatch_doc(&app, &doc);
+    }
+    result
 }
 
 /// M8.1: confirma el cierre de la ventana si hay cambios sin guardar. La invoca el
@@ -297,6 +414,7 @@ async fn confirm_close(
 
 /// M8.1: documento nuevo (Ctrl+N). Sincroniza el texto actual, confirma descarte si hay
 /// cambios sin guardar y, si se procede, resetea el store a documento nuevo vacío.
+/// M8.4b: tras el reset, suelta el watcher (doc nuevo = sin path = sin watcher).
 /// Devuelve el nuevo estado para la titlebar, o `None` si el usuario canceló.
 #[tauri::command]
 async fn new_document(
@@ -316,16 +434,35 @@ async fn new_document(
     {
         return Ok(None);
     }
-    let mut store = doc.lock().unwrap();
-    store.reset();
-    Ok(Some(DocStatus {
-        file_name: store.file_name(),
-        dirty: store.is_dirty(),
-    }))
+    let status = {
+        let mut store = doc.lock().unwrap();
+        store.reset();
+        DocStatus {
+            file_name: store.file_name(),
+            dirty: store.is_dirty(),
+        }
+    }; // guard se suelta aqui
+    // M8.4b: soltar el watcher (doc nuevo sin path: no hay archivo que observar).
+    suppress_watcher(&app.state::<FileWatcher>());
+    Ok(Some(status))
+}
+
+/// M8.4b: re-lee el archivo abierto desde disco (usando la deteccion de encoding M8.3)
+/// y devuelve el OpenedDoc para que el frontend reemplace el contenido. Tras recargar,
+/// el store queda LIMPIO (load_path_into_store invoca doc.open, que limpia dirty).
+/// Si no hay path (documento nuevo), devuelve Ok(None). NO re-arma el watcher porque
+/// solo LEE (no cambia el path ni escribe en disco).
+#[tauri::command]
+async fn reload_from_disk(doc: tauri::State<'_, Doc>) -> Result<Option<OpenedDoc>, String> {
+    let path = { doc.lock().unwrap().path().cloned() };
+    let Some(path) = path else { return Ok(None) };
+    load_path_into_store(path, &doc).map(Some)
 }
 
 /// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
 /// `async` por la posible delegacion al dialogo de save_document_as.
+/// M8.4b: suspende el watcher antes de escribir y lo re-arma despues para evitar
+/// que el write propio se detecte como cambio externo.
 #[tauri::command]
 async fn save_document(
     app: tauri::AppHandle,
@@ -337,7 +474,16 @@ async fn save_document(
     let Some(path) = existing else {
         return save_document_as(app, text, doc, session).await;
     };
-    std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
+    // M8.4b: suspender el watcher antes de escribir para no auto-disparar el evento.
+    suppress_watcher(&app.state::<FileWatcher>());
+    // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
+    // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
+    // el resto de la sesion.
+    let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
+    // M8.4b: re-armar el watcher sobre el mismo path siempre, incluso si fallo el write.
+    rewatch_doc(&app, &doc);
+    // Ahora si: propagar el error si lo hay.
+    write_result?;
     // Lock BREVE (patron M4): set_content + mark_clean bajo un bloque acotado para que
     // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
     let status = {
@@ -362,6 +508,7 @@ async fn save_document(
 }
 
 /// Guardar como: siempre dialogo nativo (en spawn_blocking). Fija el path y marca limpio.
+/// M8.4b: suspende el watcher antes de escribir y lo re-arma sobre la NUEVA ruta despues.
 #[tauri::command]
 async fn save_document_as(
     app: tauri::AppHandle,
@@ -386,7 +533,18 @@ async fn save_document_as(
     let path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
-    std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"))?;
+    // M8.4b: suspender el watcher antes de escribir (la ruta aun puede ser la antigua).
+    suppress_watcher(&app.state::<FileWatcher>());
+    // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
+    // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
+    // el resto de la sesion.
+    let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
+    if write_result.is_err() {
+        // Camino de error: re-armar sobre la ruta anterior (saved_as no se llamo, el
+        // store aun tiene el path anterior).
+        rewatch_doc(&app, &doc);
+        return write_result.map(|_| None);
+    }
     // Lock BREVE (patron M4): saved_as + set_content bajo un bloque acotado para que
     // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
     let status = {
@@ -406,6 +564,8 @@ async fn save_document_as(
         })
         .await;
     }
+    // M8.4b: re-armar el watcher sobre el NUEVO path (saved_as ya lo fijo en el store).
+    rewatch_doc(&app, &doc);
     Ok(Some(status))
 }
 
@@ -755,6 +915,8 @@ pub fn run() {
         .manage(Mutex::new(DocumentStore::new()))
         .manage(SpellState(RwLock::new(None)))
         .manage(PendingFile(Mutex::new(None)))
+        // M8.4b: watcher de cambios externos (None hasta que se abre un archivo).
+        .manage(FileWatcher(Mutex::new(None)))
         // M8.4a: session id generado en run() para que este disponible en setup() sin mover.
         .manage(SnapshotSession {
             id: uuid::Uuid::new_v4().to_string(),
@@ -785,7 +947,11 @@ pub fn run() {
             if let Some(path) = file_arg(&argv) {
                 let doc = app.state::<Doc>();
                 match load_path_into_store(PathBuf::from(&path), &doc) {
-                    Ok(opened) => *app.state::<PendingFile>().0.lock().unwrap() = Some(opened),
+                    Ok(opened) => {
+                        *app.state::<PendingFile>().0.lock().unwrap() = Some(opened);
+                        // M8.4b: armar el watcher sobre el archivo del arranque en frio.
+                        rewatch_doc(app.handle(), &doc);
+                    }
                     Err(e) => eprintln!("no se pudo abrir el archivo de inicio '{path}': {e}"),
                 }
             }
@@ -817,7 +983,8 @@ pub fn run() {
             spellcheck,
             take_pending_file,
             write_snapshot,
-            take_pending_restore
+            take_pending_restore,
+            reload_from_disk
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

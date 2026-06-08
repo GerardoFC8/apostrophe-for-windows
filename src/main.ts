@@ -60,6 +60,11 @@ const statSentences = document.querySelector<HTMLElement>("#stat-sentences")!;
 const statParagraphs = document.querySelector<HTMLElement>("#stat-paragraphs")!;
 const statReadTime = document.querySelector<HTMLElement>("#stat-readtime")!;
 
+// M8.4b: infobar de cambio externo.
+const externalChangeBar = document.querySelector<HTMLElement>("#external-change-bar")!;
+const reloadBtn = document.querySelector<HTMLButtonElement>("#reload-btn")!;
+const keepBtn = document.querySelector<HTMLButtonElement>("#keep-btn")!;
+
 // Ultimo HTML crudo de pandoc, para re-tematizar el preview al cambiar de tema sin
 // volver a invocar pandoc.
 let lastPreviewHtml = "";
@@ -404,6 +409,58 @@ async function exportDoc(): Promise<void> {
 // M6: focus mode todavia no existe como feature; el hook queda cableado (WU6). Cuando
 // exista, isFocusMode() devuelve true y el spellcheck se auto-desactiva (ADR-0001 D2).
 const isFocusMode = (): boolean => false;
+
+// --- M8.4b: watcher de cambios externos ---
+
+function showExternalChangeBar(): void {
+  externalChangeBar.hidden = false;
+}
+
+function hideExternalChangeBar(): void {
+  externalChangeBar.hidden = true;
+}
+
+// Re-lee el archivo abierto desde disco y actualiza el editor. Si el backend devuelve
+// un OpenedDoc, el store queda limpio (load_path_into_store hace doc.open).
+async function reloadFromDisk(): Promise<void> {
+  const opened = await invoke<OpenedDoc | null>("reload_from_disk");
+  if (opened) {
+    setEditorText(opened.content);
+    updateTitlebar(opened.file_name, false); // recargado = limpio
+  }
+  hideExternalChangeBar();
+}
+
+// Listener de cambio externo: ramifica por estado dirty (decision de producto M8.4b).
+// Decide sobre el dirty REAL del texto vivo: sincroniza getText() con el store via
+// set_content y usa ese dirty, para no recargar y pisar tecleos recientes cuando el
+// doc parece limpio pero aun no paso el debounce (ventana de hasta 250ms).
+void listen("file-changed-on-disk", async () => {
+  let dirty: boolean;
+  try {
+    const st = await invoke<DocStatus>("set_content", { text: getText() });
+    dirty = st.dirty;
+  } catch {
+    dirty = true; // ante la duda, NO recargar de forma destructiva (fail-safe)
+  }
+  if (!dirty) {
+    // Sin cambios locales: recargar directo es seguro (el usuario no pierde nada).
+    await reloadFromDisk();
+    flashStatus("El archivo cambió en disco — recargado", 4000);
+  } else {
+    // Con cambios locales sin guardar: mostrar el infobar (eleccion explicita del usuario).
+    showExternalChangeBar();
+  }
+});
+
+// Botones del infobar.
+reloadBtn.addEventListener("click", () => {
+  void reloadFromDisk().then(() => flashStatus("Archivo recargado desde disco", 3000));
+});
+keepBtn.addEventListener("click", () => {
+  // El usuario elige mantener sus cambios; el proximo Ctrl+S sobrescribira el cambio externo.
+  hideExternalChangeBar();
+});
 
 function scheduleUpdate(): void {
   if (timer !== undefined) clearTimeout(timer);

@@ -261,6 +261,33 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* M8.4b: infobar de cambio externo. Banda horizontal entre la titlebar y el editor;
+   NO modal, el editor sigue activo. Se muestra solo cuando isDirty y el archivo cambia
+   en disco. Reutiliza --border, --hover y --chrome-fg del tema activo. */
+.external-change-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.8rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.external-change-bar[hidden] {
+  display: none;
+}
+
+.external-change-msg {
+  opacity: 0.9;
+  flex: 1;
+}
+
+.external-change-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
 /* Spellcheck (M6): ondulita roja bajo palabras mal escritas + menu de sugerencias. */
 .cm-spell-error {
   text-decoration: underline wavy #e01b24;

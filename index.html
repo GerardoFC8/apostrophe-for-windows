@@ -42,6 +42,15 @@
         </button>
       </div>
     </header>
+    <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo cambia en disco
+         mientras hay cambios locales sin guardar. NO modal: el editor sigue activo. -->
+    <div id="external-change-bar" class="external-change-bar" hidden>
+      <span class="external-change-msg">El archivo cambió en disco.</span>
+      <div class="external-change-actions">
+        <button id="reload-btn" class="bar-btn" type="button">Recargar y perder mis cambios</button>
+        <button id="keep-btn" class="bar-btn" type="button">Mantener mis cambios</button>
+      </div>
+    </div>
     <main class="split">
       <div id="editor" class="editor"></div>
       <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede

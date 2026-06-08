@@ -41,3 +41,4 @@ uuid = { version = "1", features = ["v4"] }
 # M8.4a: tokio::time::sleep para el timer de autosave (runtime de Tauri ya usa tokio;
 # agregamos la dep directa con el feature `time` para poder llamar sleep).
 tokio = { version = "1", features = ["time"] }
+notify-debouncer-full = "0.7"
