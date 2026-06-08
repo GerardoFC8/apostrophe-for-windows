@@ -6,11 +6,14 @@
 //!
 //! Modulos del nucleo (ver ADR-0001 "Que va en el NUCLEO Rust"):
 //! - `stats`: contador de estadisticas de texto (PRIMER objetivo de TDD).
+//! - `encoding`: decodificacion de bytes a texto con deteccion de encoding
+//!   (BOM, UTF-8, legacy windows-1252/latin-1 via chardetng).
 //! - (futuro) parser de markup (~22 regex), orquestador de conversion,
 //!   politica de seguridad de preview, document store, spellcheck.
 
 pub mod convert;
 pub mod document;
+pub mod encoding;
 pub mod markup;
 pub mod spellcheck;
 pub mod stats;

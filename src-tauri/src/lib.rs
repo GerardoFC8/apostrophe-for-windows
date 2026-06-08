@@ -174,8 +174,9 @@ async fn confirm_discard_if_dirty(
 /// "leer archivo -> estado del documento", reusada por el dialogo (open_document), el
 /// arranque en frio (setup) y la apertura via asociacion (open_path).
 fn load_path_into_store(path: PathBuf, doc: &Doc) -> Result<OpenedDoc, String> {
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+    let bytes =
+        std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+    let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

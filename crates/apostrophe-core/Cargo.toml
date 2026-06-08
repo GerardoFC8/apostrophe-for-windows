@@ -21,6 +21,12 @@ serde = { version = "1", features = ["derive"], optional = true }
 # `spellbook-backend`. El dominio depende del trait `Dictionary`, no de spellbook (ADR-0001):
 # asi el TDD de la logica de spans corre sin parsear .aff/.dic. Pineado (alpha). MPL-2.0.
 spellbook = { version = "=0.4.1", optional = true }
+# encoding_rs: decodificador WHATWG-compliant (Mozilla) para todos los encodings web
+# legacy (windows-1252, latin-1, UTF-16, etc.) + BOM sniffing. Dominio puro, sin I/O.
+encoding_rs = "0.8"
+# chardetng: detector de encoding para contenido legacy (misma familia que encoding_rs).
+# API 1.x usa enums Iso2022JpDetection/Utf8Detection en lugar de bools (cambio de 0.x).
+chardetng = "1"
 
 [features]
 serde = ["dep:serde"]
