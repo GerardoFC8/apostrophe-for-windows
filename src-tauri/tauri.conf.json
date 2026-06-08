@@ -34,6 +34,26 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "copyright": "© 2026 Gerardo Franco — GPL-3.0-or-later",
+    "category": "Productivity",
+    "shortDescription": "Editor de Markdown nativo y libre de distracciones.",
+    "longDescription": "Apostrophe para Windows: editor de Markdown nativo, minimalista y libre de distracciones. Vista previa en vivo, temas claro/oscuro/sepia, exportación y corrector ortográfico en español. Port nativo del editor Apostrophe de GNOME.",
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown Document",
+        "description": "Documento Markdown",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Spanish", "SpanishInternational", "English"],
+        "displayLanguageSelector": true
+      }
+    }
   }
 }
