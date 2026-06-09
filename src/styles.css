@@ -197,6 +197,58 @@ body {
   opacity: 1;
 }
 
+/* M11: menú hamburguesa. Mismo contenedor/popover que .theme-select (reusa .theme-menu
+   vía la clase compartida en el HTML). El trigger es un .bar-btn solo-icono. */
+.menu-select {
+  position: relative;
+  margin-right: 0.4rem;
+}
+
+.menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0; /* la margin la lleva .menu-select */
+  padding: 0 0.45rem;
+}
+
+.menu-trigger svg {
+  opacity: 0.85;
+}
+
+/* El popover del menú se ancla a la IZQUIERDA (el trigger está al inicio del grupo),
+   a diferencia del theme-menu que se ancla a la derecha. */
+.app-menu {
+  left: 0;
+  right: auto;
+  min-width: 200px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: default;
+}
+
+.menu-item:hover {
+  background: var(--hover);
+}
+
+/* Hint de tecla del item (alineado a la derecha). */
+.menu-hint {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .window-controls {
   display: flex;
   height: 100%;
@@ -591,5 +643,200 @@ body.view-preview #preview { border-left: 0; }
 body.focus-mode .view-control {
   opacity: 0.4;
   pointer-events: none;
+}
+/* ====================================================================== */
+
+/* ====== M11: overlays modales (atajos de teclado / acerca de) ===========
+   Backdrop a pantalla completa + panel centrado. Todo con las CSS vars del tema, así se
+   ve bien en claro/oscuro/sepia. El JS (main.ts) togglea el [hidden] del contenedor. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100; /* por encima de todo el chrome (titlebar z-index ~11) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+/* Fondo semi-transparente: oscurece el contenido detrás. Cubre todo el viewport y captura
+   el clic-para-cerrar (el panel detiene la propagación arriba). */
+.overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Panel centrado: ancho/alto máximos con scroll interno si el contenido desborda. */
+.overlay-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  max-height: 100%;
+  background: var(--bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.about-panel {
+  max-width: 420px;
+}
+
+.overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.overlay-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.overlay-close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: default;
+}
+
+.overlay-close:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
+/* Cuerpo con scroll interno: si la lista de atajos no entra, scrollea solo el cuerpo
+   (el header queda fijo). */
+.overlay-body {
+  padding: 1rem 1.1rem 1.2rem;
+  overflow-y: auto;
+}
+
+/* --- Listado de atajos, agrupado por secciones --- */
+.shortcuts-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 1.6rem;
+  align-content: start;
+}
+
+/* En pantallas estrechas, una sola columna. */
+@media (max-width: 520px) {
+  .shortcuts-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shortcuts-section {
+  break-inside: avoid;
+}
+
+.shortcuts-heading {
+  margin: 0.4rem 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.shortcuts-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+}
+
+.shortcuts-list dt {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.shortcuts-list dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Tecla individual. Aspecto sutil con fondo, borde y tipografía monoespaciada. */
+kbd {
+  display: inline-block;
+  min-width: 1.1em;
+  padding: 0.1em 0.4em;
+  background: var(--preview-code-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* --- Acerca de --- */
+.about-body {
+  text-align: center;
+}
+
+.about-name {
+  margin: 0.2rem 0 0.3rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.about-version {
+  margin: 0 0 0.8rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.about-desc {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+}
+
+.about-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.88rem;
+  cursor: default;
+}
+
+.about-link:hover {
+  text-decoration: underline;
+}
+
+.about-credits {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.6;
+  line-height: 1.5;
 }
 /* ====================================================================== */

@@ -7,6 +7,10 @@ import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
+// M11: versión en build-time (sin IPC). tsconfig tiene resolveJsonModule, así que el
+// import del package.json es type-safe y lo resuelve Vite al empaquetar.
+import pkg from "../package.json";
 import { EditorState, Transaction, Compartment } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, keymap } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
@@ -241,9 +245,175 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeThemeMenu();
 });
 
+// Hereda en este mismo punto el cierre por Esc de los overlays/menú de M11: el cableado
+// vive más abajo (closeTopmostChrome), pero el handler de captura de modos (que decide si
+// Esc sale de fullscreen) lo integra vía escHasPriorityTarget para respetar la prioridad.
+
 exportBtn.addEventListener("click", () => void exportDoc());
 
 buildThemeMenu();
+
+// --- M11: menú hamburguesa + overlays modales (atajos / acerca de) ---
+// Frontend puro (ADR-0001): no toca el dominio ni agrega comandos. Reusa el patrón del
+// theme-menu (toggle del hidden + aria-expanded, cierre por clic-afuera y Esc).
+const menuTrigger = document.querySelector<HTMLButtonElement>("#menu-trigger")!;
+const appMenu = document.querySelector<HTMLElement>("#app-menu")!;
+const shortcutsOverlay = document.querySelector<HTMLElement>("#shortcuts-overlay")!;
+const aboutOverlay = document.querySelector<HTMLElement>("#about-overlay")!;
+
+function openAppMenu(): void {
+  closeThemeMenu(); // solo un popover abierto a la vez
+  appMenu.hidden = false;
+  menuTrigger.setAttribute("aria-expanded", "true");
+}
+function closeAppMenu(): void {
+  appMenu.hidden = true;
+  menuTrigger.setAttribute("aria-expanded", "false");
+}
+
+menuTrigger.addEventListener("click", (e) => {
+  e.stopPropagation(); // que no llegue al cierre-por-clic-afuera de document
+  if (appMenu.hidden) openAppMenu();
+  else closeAppMenu();
+});
+document.addEventListener("click", () => closeAppMenu()); // clic afuera cierra
+appMenu.addEventListener("click", (e) => e.stopPropagation()); // clic dentro NO cierra
+
+// Al abrir el theme-menu, cerrar el app-menu (espejo de la lógica inversa en openAppMenu).
+themeTrigger.addEventListener("click", () => closeAppMenu());
+
+// Overlays modales. openX cierra el app-menu y mueve el foco al botón × (accesible).
+//
+// Accesibilidad de modal (paridad con el patrón ARIA dialog): los paneles declaran
+// aria-modal=true, así que cumplimos las dos promesas que implica:
+//  1) al CERRAR, devolvemos el foco al elemento que abrió el overlay (lastFocused), para
+//     no dejarlo caer al <body> y romper el orden de tabulación del usuario de teclado;
+//  2) mientras está abierto, atrapamos Tab dentro del panel (trapTab) para que el foco no
+//     escape a los controles del chrome/editor que quedan detrás del backdrop.
+// El elemento a restaurar se captura del foco vivo al abrir; en el caso Ctrl+? el foco
+// estaba en el editor, así que se restaura allí solo (view.focus() vía el fallback de abajo).
+let lastFocused: HTMLElement | null = null;
+
+// Captura el disparador a restaurar ANTES de cerrar el app-menu. Importa el orden: cerrar
+// el menú lo oculta con [hidden] y el foco caería al <body> (que no es un objetivo útil);
+// por eso leemos document.activeElement primero. Si el disparador es un item del menú (que
+// quedará oculto), guardamos el trigger hamburguesa, que sigue visible y enfocable. Para
+// Ctrl+? el foco está en el editor: se guarda el contenteditable de CM6 y se restaura allí.
+function captureOverlayTrigger(): void {
+  const active = document.activeElement as HTMLElement | null;
+  lastFocused = active && active.closest(".app-menu") ? menuTrigger : active;
+}
+
+// Devuelve el foco al disparador guardado al cerrar el overlay. Si el disparador ya no
+// existe, no es enfocable, o era el <body> (sin foco real), reenfoca el editor.
+function restoreFocusAfterOverlay(): void {
+  const target = lastFocused;
+  lastFocused = null;
+  if (target && target !== document.body && document.contains(target)) target.focus();
+  else view.focus();
+}
+
+function openShortcuts(): void {
+  captureOverlayTrigger(); // a quién devolver el foco al cerrar (antes de cerrar el menú)
+  closeAppMenu();
+  aboutOverlay.hidden = true; // un overlay a la vez
+  shortcutsOverlay.hidden = false;
+  document.querySelector<HTMLButtonElement>("#shortcuts-close")?.focus();
+}
+function closeShortcuts(): void {
+  shortcutsOverlay.hidden = true;
+  restoreFocusAfterOverlay();
+}
+function openAbout(): void {
+  captureOverlayTrigger(); // a quién devolver el foco al cerrar (antes de cerrar el menú)
+  closeAppMenu();
+  shortcutsOverlay.hidden = true; // un overlay a la vez
+  aboutOverlay.hidden = false;
+  document.querySelector<HTMLButtonElement>("#about-close")?.focus();
+}
+function closeAbout(): void {
+  aboutOverlay.hidden = true;
+  restoreFocusAfterOverlay();
+}
+
+// Focus trap del overlay activo: cicla el Tab/Shift+Tab entre los focusables del panel
+// para que aria-modal=true sea cierto (el foco no se escapa al chrome/editor de atrás).
+// Devuelve true si consumió el evento (había un overlay abierto y trató el Tab).
+function trapTab(e: KeyboardEvent): boolean {
+  const overlay = !shortcutsOverlay.hidden
+    ? shortcutsOverlay
+    : !aboutOverlay.hidden
+      ? aboutOverlay
+      : null;
+  if (!overlay) return false;
+  const panel = overlay.querySelector<HTMLElement>(".overlay-panel");
+  if (!panel) return false;
+  const focusables = panel.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  );
+  if (focusables.length === 0) {
+    e.preventDefault(); // sin focusables, no dejes que el Tab salga del panel
+    return true;
+  }
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !panel.contains(active)) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (active === last || !panel.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  return true;
+}
+
+// Items del menú.
+document.querySelector<HTMLButtonElement>("#menu-shortcuts")?.addEventListener("click", openShortcuts);
+document.querySelector<HTMLButtonElement>("#menu-about")?.addEventListener("click", openAbout);
+
+// Cierre de los overlays: botón × y clic en el BACKDROP (no en el panel). El backdrop y el
+// panel son HERMANOS dentro de .overlay (no el panel hijo del backdrop), así que un clic en
+// el panel nunca alcanza al backdrop: no hace falta stopPropagation para que el panel no cierre.
+document.querySelector<HTMLButtonElement>("#shortcuts-close")?.addEventListener("click", closeShortcuts);
+document.querySelector<HTMLButtonElement>("#about-close")?.addEventListener("click", closeAbout);
+shortcutsOverlay.querySelector(".overlay-backdrop")?.addEventListener("click", closeShortcuts);
+aboutOverlay.querySelector(".overlay-backdrop")?.addEventListener("click", closeAbout);
+
+// M11: versión en el Acerca de (build-time, sin IPC). pkg.version sale de package.json.
+const aboutVersionNum = document.querySelector<HTMLElement>("#about-version-num");
+if (aboutVersionNum) aboutVersionNum.textContent = pkg.version;
+
+// Enlaces externos: en WebView2 un <a target=_blank> NO abre el navegador del sistema; hay
+// que usar el plugin opener (openUrl). Interceptamos el clic y delegamos en el SO.
+document.querySelectorAll<HTMLAnchorElement>("[data-external-link]").forEach((a) => {
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    void openUrl(a.href);
+  });
+});
+
+// ¿Hay un overlay/menú abierto que Esc deba cerrar PRIMERO? Devuelve el cierre a aplicar,
+// o null si no hay nada. El orden refleja la prioridad: overlay modal > popover del menú.
+function closeTopmostChrome(): boolean {
+  if (!shortcutsOverlay.hidden) {
+    closeShortcuts();
+    return true;
+  }
+  if (!aboutOverlay.hidden) {
+    closeAbout();
+    return true;
+  }
+  if (!appMenu.hidden) {
+    closeAppMenu();
+    return true;
+  }
+  return false;
+}
 
 // Tema del editor (Adwaita-ish): hereda los colores via CSS vars (cambian con data-theme),
 // tipografia JetBrains Mono. El acento es el azul Adwaita.
@@ -1031,6 +1201,8 @@ document.querySelector(".titlebar")?.addEventListener("mouseleave", () => {
 // no oculta el chrome mientras la busqueda o un aviso esten visibles).
 function escHasPriorityTarget(): boolean {
   if (!themeMenu.hidden) return true; // el menu de tema tiene su propio Esc (mas abajo)
+  if (!appMenu.hidden) return true; // M11: menu hamburguesa abierto
+  if (!shortcutsOverlay.hidden || !aboutOverlay.hidden) return true; // M11: overlay modal abierto
   if (view.dom.querySelector(".cm-search")) return true; // panel de busqueda CM6 abierto
   if (document.querySelector(".spell-menu")) return true; // menu de sugerencias del corrector
   return false;
@@ -1044,6 +1216,28 @@ function escHasPriorityTarget(): boolean {
 window.addEventListener(
   "keydown",
   (e) => {
+    // M11: Ctrl+? abre la ventana de atajos. El "?" sale de Shift+/, así que e.key da el
+    // carácter resultante ("?"). En CAPTURA para ganarle a cualquier binding del editor.
+    if ((e.ctrlKey || e.metaKey) && e.key === "?") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      openShortcuts();
+      return;
+    }
+    // M11: focus trap del overlay modal. Con un overlay abierto, Tab/Shift+Tab ciclan
+    // dentro del panel (no escapan al chrome/editor de atrás), cumpliendo aria-modal=true.
+    if (e.key === "Tab" && trapTab(e)) {
+      e.stopImmediatePropagation();
+      return;
+    }
+    // M11: Esc cierra PRIMERO el overlay/menú abierto (antes de que actúe el fullscreen).
+    // Si hubo algo que cerrar, no seguimos: Esc no debe salir de fullscreen en el mismo
+    // pulso (caso borde: overlay abierto Y en fullscreen → solo se cierra el overlay).
+    if (e.key === "Escape" && closeTopmostChrome()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     // F11: alterna pantalla completa. Ignora el autorepeat (mantener F11 presionado).
     if (e.key === "F11") {
       e.preventDefault();

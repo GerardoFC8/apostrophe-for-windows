@@ -16,6 +16,25 @@
       <span class="brand" data-tauri-drag-region>Apostrophe</span>
       <span id="doc-name" class="doc-name" data-tauri-drag-region>Sin título</span>
       <span id="status" class="status" data-tauri-drag-region></span>
+      <!-- M11: menú hamburguesa. Mismo patrón de popover que .theme-select: un trigger
+           (.bar-btn) que togglea un popover role=menu oculto. Abre la ventana de atajos
+           y el diálogo Acerca de (ambos overlays modales más abajo). -->
+      <div class="menu-select">
+        <button class="bar-btn menu-trigger" id="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" title="Menú">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true">
+            <path d="M2.5 4 H13.5 M2.5 8 H13.5 M2.5 12 H13.5" />
+          </svg>
+        </button>
+        <div class="app-menu theme-menu" id="app-menu" role="menu" hidden>
+          <button class="menu-item" id="menu-shortcuts" type="button" role="menuitem" aria-haspopup="dialog" aria-keyshortcuts="Control+?">
+            <span>Atajos de teclado</span>
+            <span class="menu-hint"><kbd>Ctrl</kbd>+<kbd>?</kbd></span>
+          </button>
+          <button class="menu-item" id="menu-about" type="button" role="menuitem" aria-haspopup="dialog">
+            <span>Acerca de</span>
+          </button>
+        </div>
+      </div>
       <div class="theme-select">
         <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" title="Tema">
           <span class="theme-trigger-icon" id="theme-trigger-icon"></span>
@@ -91,5 +110,105 @@
       <span id="stat-paragraphs">0 párrafos</span>
       <span id="stat-readtime">0 s de lectura</span>
     </footer>
+
+    <!-- M11: overlay modal de atajos de teclado. Backdrop a pantalla completa + panel
+         centrado. Se abre con Ctrl+? o desde el menú; se cierra con Esc, con clic en el
+         backdrop o con el botón ×. Las teclas usan <kbd>. La lista está agrupada por
+         secciones; cada atajo verificado contra los handlers de main.ts. -->
+    <div id="shortcuts-overlay" class="overlay" hidden>
+      <div class="overlay-backdrop"></div>
+      <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+        <header class="overlay-header">
+          <h2 id="shortcuts-title" class="overlay-title">Atajos de teclado</h2>
+          <button class="overlay-close" id="shortcuts-close" type="button" aria-label="Cerrar">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M1 1 L13 13 M13 1 L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+          </button>
+        </header>
+        <div class="overlay-body shortcuts-body">
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Archivo</h3>
+            <dl class="shortcuts-list">
+              <dt>Abrir</dt><dd><kbd>Ctrl</kbd>+<kbd>O</kbd></dd>
+              <dt>Guardar</dt><dd><kbd>Ctrl</kbd>+<kbd>S</kbd></dd>
+              <dt>Guardar como</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dd>
+              <dt>Nuevo documento</dt><dd><kbd>Ctrl</kbd>+<kbd>N</kbd></dd>
+              <dt>Exportar a HTML</dt><dd><kbd>Ctrl</kbd>+<kbd>E</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Edición y formato</h3>
+            <dl class="shortcuts-list">
+              <dt>Negrita</dt><dd><kbd>Ctrl</kbd>+<kbd>B</kbd></dd>
+              <dt>Cursiva</dt><dd><kbd>Ctrl</kbd>+<kbd>I</kbd></dd>
+              <dt>Tachado</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></dd>
+              <dt>Lista</dt><dd><kbd>Ctrl</kbd>+<kbd>U</kbd></dd>
+              <dt>Encabezado (niveles 1 a 4)</dt><dd><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>4</kbd></dd>
+              <dt>Buscar</dt><dd><kbd>Ctrl</kbd>+<kbd>F</kbd></dd>
+              <dt>Buscar y reemplazar</dt><dd><kbd>Ctrl</kbd>+<kbd>H</kbd></dd>
+              <dt>Deshacer</dt><dd><kbd>Ctrl</kbd>+<kbd>Z</kbd></dd>
+              <dt>Rehacer</dt><dd><kbd>Ctrl</kbd>+<kbd>Y</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Vista</h3>
+            <dl class="shortcuts-list">
+              <dt>Alternar vista (editor / dividido / solo vista)</dt><dd><kbd>Ctrl</kbd>+<kbd>P</kbd></dd>
+              <dt>Pantalla completa</dt><dd><kbd>F11</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Modos de escritura</h3>
+            <dl class="shortcuts-list">
+              <dt>Enfoque</dt><dd><kbd>Ctrl</kbd>+<kbd>D</kbd></dd>
+              <dt>Hemingway</dt><dd><kbd>Ctrl</kbd>+<kbd>T</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Corrector</h3>
+            <dl class="shortcuts-list">
+              <dt>Activar o desactivar el corrector</dt><dd><kbd>F7</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading">Ayuda</h3>
+            <dl class="shortcuts-list">
+              <dt>Atajos de teclado</dt><dd><kbd>Ctrl</kbd>+<kbd>?</kbd></dd>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- M11: overlay modal Acerca de. Misma mecánica que el de atajos. La versión la
+         inyecta main.ts (importada de package.json en build-time). Los enlaces externos
+         los abre el plugin opener (un <a target=_blank> no abre el navegador en WebView2). -->
+    <div id="about-overlay" class="overlay" hidden>
+      <div class="overlay-backdrop"></div>
+      <div class="overlay-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title">
+        <header class="overlay-header">
+          <h2 id="about-title" class="overlay-title">Acerca de</h2>
+          <button class="overlay-close" id="about-close" type="button" aria-label="Cerrar">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M1 1 L13 13 M13 1 L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+          </button>
+        </header>
+        <div class="overlay-body about-body">
+          <p class="about-name">Apostrophe para Windows</p>
+          <p class="about-version">Versión <span id="about-version-num">—</span></p>
+          <p class="about-desc">Editor de Markdown nativo para Windows. Port de Apostrophe (GNOME).</p>
+          <div class="about-links">
+            <a href="https://github.com/Gerardo-Franco/apostrophe-for-windows" id="about-link-repo" class="about-link" data-external-link>Repositorio</a>
+            <a href="https://gitlab.gnome.org/World/apostrophe" id="about-link-upstream" class="about-link" data-external-link>Proyecto original (GNOME)</a>
+          </div>
+          <p class="about-credits">
+            Distribuido bajo licencia GPL-3.0. Apostrophe es una marca de sus autores originales.
+            Las gracias al equipo de Apostrophe (GNOME) por el editor que inspira este port.
+          </p>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
