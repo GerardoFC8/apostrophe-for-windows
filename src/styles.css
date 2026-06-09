@@ -411,3 +411,76 @@ body {
 .spell-item:hover {
   background: var(--hover);
 }
+
+/* --- M9.1: modo enfoque (Ctrl+D) --- */
+/* Atenúa el texto fuera del párrafo enfocado. Equivalente cross-tema al foreground='gray'
+   del upstream (tag 'unfocused_text'); aquí opacidad para que ande en los tres temas. */
+.cm-dim {
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+
+/* Distraction-free: oculta el preview y centra el editor en un ancho de lectura cómodo;
+   atenúa el chrome (titlebar/statusbar), recuperable al pasar el mouse. La clase la pone
+   y la saca el JS (toggleFocusMode); todo es reversible al salir. */
+body.focus-mode .split {
+  grid-template-columns: 1fr; /* el editor toma todo el ancho (preview oculto) */
+}
+body.focus-mode .preview {
+  display: none;
+}
+body.focus-mode .cm-content {
+  max-width: 70ch; /* ancho de lectura cómodo */
+  margin: 0 auto; /* centrado */
+}
+/* Atenuamos el chrome, PERO no #status: ahí se pinta el flash de confirmación de los modos
+   (toggleFocusMode escribe en #status). La opacidad en el padre afecta a todo su subárbol y
+   un hijo no puede "des-atenuarse"; por eso atenuamos los hijos de la titlebar uno a uno,
+   excluyendo #status, en vez de la titlebar entera. */
+body.focus-mode .titlebar > *:not(#status),
+body.focus-mode .statusbar {
+  opacity: 0.25;
+  transition: opacity 150ms ease;
+}
+body.focus-mode .titlebar:hover > *:not(#status),
+body.focus-mode .statusbar:hover {
+  opacity: 1; /* escape: mover/cerrar la ventana, ver las stats */
+}
+/* La línea activa no debe competir con el atenuado del párrafo. */
+body.focus-mode .cm-activeLine {
+  background: transparent;
+}
+
+/* --- M9.3: pantalla completa (F11) --- */
+/* Oculta el chrome custom para inmersión total (paridad: el upstream oculta headerbar +
+   bottombar). El editor crece solo (body es flex-column y .split es flex:1). El
+   external-change-bar NUNCA se oculta: es un aviso de posible pérdida de datos. */
+body.is-fullscreen .titlebar,
+body.is-fullscreen .statusbar {
+  display: none;
+}
+/* Reveal-on-hover del borde superior: la titlebar reaparece como overlay (sin reflujo del
+   editor) mientras el mouse esté arriba, para mover/cerrar la ventana (paridad con el
+   GtkRevealer crossfade del upstream). */
+#fs-hover-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 10;
+  pointer-events: none;
+}
+body.is-fullscreen #fs-hover-zone {
+  pointer-events: auto; /* solo en fullscreen escucha el hover del borde superior */
+}
+body.is-fullscreen.reveal-chrome .titlebar {
+  display: flex;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 11;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}

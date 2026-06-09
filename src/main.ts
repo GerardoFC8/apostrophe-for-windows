@@ -7,12 +7,13 @@ import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { EditorState, Transaction } from "@codemirror/state";
+import { EditorState, Transaction, Compartment } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, keymap } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { search, searchKeymap, openSearchPanel } from "@codemirror/search";
-import { spellcheckExtension, requestSpellCheck } from "./spellcheck";
+import { spellcheckExtension, requestSpellCheck, clearSpellSpans } from "./spellcheck";
+import { focusCompartment, enableFocusDim, disableFocusDim } from "./focus-mode";
 
 // M3: editor CodeMirror 6. M4: abrir/guardar .md. M5: temas light/dark/sepia +
 // export a HTML. La logica esta en Rust; la WebView solo PRESENTA. La frontera IPC
@@ -413,9 +414,11 @@ async function exportDoc(): Promise<void> {
   }
 }
 
-// M6: focus mode todavia no existe como feature; el hook queda cableado (WU6). Cuando
-// exista, isFocusMode() devuelve true y el spellcheck se auto-desactiva (ADR-0001 D2).
-const isFocusMode = (): boolean => false;
+// M9.1: estado del modo enfoque. isFocusMode() lo expone para el spellcheck (focus apaga
+// las ondulitas — ADR-0001 D2). El atenuado del texto por parrafo vive en ./focus-mode; el
+// toggle (toggleFocusMode) esta mas abajo, junto al resto de los modos de escritura.
+let focusMode = false;
+const isFocusMode = (): boolean => focusMode;
 
 // --- M8.4b: watcher de cambios externos ---
 
@@ -740,6 +743,47 @@ const formatKeymap = keymap.of([
   { key: "Mod-h", run: openSearchPanel, preventDefault: true },
 ]);
 
+// --- M9.2: modo Hemingway (Ctrl+T): no puedes borrar lo que escribiste ---
+// Paridad con el upstream (apostrophe/text_buffer.py: do_delete_range bloquea el borrado y
+// do_insert_text bloquea escribir sobre una seleccion). Lo replicamos con un changeFilter
+// que RECHAZA solo las transacciones del USUARIO que remueven texto existente: borrar/cortar
+// ("delete"/"delete.cut"), teclear o pegar sobre una seleccion ("input.type"/"input.paste")
+// y arrastrar-para-mover ("move.drop", que borra el origen). Lo programatico (abrir/recargar/
+// nuevo, formato Markdown, auto-listas) NO lleva userEvent y pasa; undo/redo ("undo"/"redo")
+// tampoco se bloquean (el modo intercepta el borrado del usuario, no la pila de historial);
+// y Buscar/Reemplazar ("input.replace") se permite: es una edicion intencional, no un borrado.
+// userEvents verificados contra @codemirror/{commands,view,search,state} instalados.
+let hemingwayMode = false;
+let lastHemingwayNotice = 0; // throttle del aviso (evita que se pegue con el autorepeat)
+const hemingwayCompartment = new Compartment();
+const hemingwayFilter = EditorState.changeFilter.of((tr) => {
+  if (!tr.docChanged) return true; // mover el cursor / seleccionar no borra: permitido
+  if (tr.isUserEvent("input.replace")) return true; // Reemplazar (M7) es edicion, no borrado
+  // Solo se filtra el borrado/movimiento iniciado por el USUARIO.
+  if (!(tr.isUserEvent("delete") || tr.isUserEvent("input") || tr.isUserEvent("move.drop"))) {
+    return true; // programatico / undo / redo / arrastre-copia (input.drop solo inserta)
+  }
+  // ¿Remueve texto EXISTENTE? No contamos reemplazos no-op (lo quitado === lo insertado),
+  // p.ej. el "skip-over" de un cierre de closeBrackets (teclear ")" sobre un ")" ya puesto).
+  let removesText = false;
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (toA > fromA && tr.startState.sliceDoc(fromA, toA) !== inserted.toString()) {
+      removesText = true;
+    }
+  });
+  if (!removesText) return true; // insercion pura o reemplazo no-op
+  // Aviso (throttleado): el filtro decide; el feedback es secundario. No reseteamos el
+  // timer en cada tecla del autorepeat para que el mensaje no se quede pegado.
+  const now = performance.now();
+  if (now - lastHemingwayNotice > 1200) {
+    flashStatus("El texto no se puede borrar en modo Hemingway");
+    lastHemingwayNotice = now;
+  }
+  // CM6 descarta los cambios (el texto se conserva); la seleccion del usuario colapsa a
+  // cursor (changeFilter no puede reescribir la seleccion) — comportamiento aceptado.
+  return false;
+});
+
 // CodeMirror 6: editor de verdad (undo/redo, line-wrap, cierre de brackets) SIN
 // gramatica Lezer (ADR-0001 D1). Los atajos de archivo van a nivel window (arriba).
 // Arranca VACIO (distraction-free): sin texto de ejemplo. Si la app se abre via
@@ -749,8 +793,12 @@ const view = new EditorView({
   parent: editorParent,
   extensions: [
     history(),
+    // M9.2: filtro de Hemingway (arranca vacio; Ctrl+T lo activa).
+    hemingwayCompartment.of([]),
     drawSelection(),
     highlightActiveLine(),
+    // M9.1: atenuado por parrafo del modo enfoque (arranca vacio; Ctrl+D lo activa).
+    focusCompartment.of([]),
     EditorView.lineWrapping,
     closeBrackets(),
     // Traducciones del panel de busqueda al castellano.
@@ -782,6 +830,150 @@ void requestSpellCheck(view, getText(), isFocusMode());
 void listen("spell-dict-ready", () => {
   void requestSpellCheck(view, getText(), isFocusMode());
 });
+
+// --- M9: modos de escritura (enfoque / Hemingway / pantalla completa) ---
+
+// M9.1: alterna el modo enfoque. Activa/desactiva el atenuado por parrafo (./focus-mode),
+// togglea la clase body.focus-mode (CSS distraction-free: oculta el preview, centra el
+// editor, atenua el chrome) y gestiona el spellcheck (al entrar lo apaga, al salir lo
+// repinta — ADR-0001 D2).
+function toggleFocusMode(): void {
+  focusMode = !focusMode;
+  document.body.classList.toggle("focus-mode", focusMode);
+  if (focusMode) {
+    enableFocusDim(view);
+    clearSpellSpans(view); // entrar: apaga las ondulitas
+  } else {
+    disableFocusDim(view);
+    void requestSpellCheck(view, getText(), false); // salir: repinta el spellcheck
+  }
+  flashStatus(focusMode ? "Modo enfoque activado" : "Modo enfoque desactivado", 1500);
+}
+
+// M9.2: alterna el modo Hemingway reconfigurando el compartment del changeFilter en
+// caliente (sin recrear el EditorView).
+function toggleHemingway(): void {
+  hemingwayMode = !hemingwayMode;
+  view.dispatch({
+    effects: hemingwayCompartment.reconfigure(hemingwayMode ? hemingwayFilter : []),
+  });
+  flashStatus(
+    hemingwayMode
+      ? "Modo Hemingway activado — no puedes borrar texto"
+      : "Modo Hemingway desactivado",
+    1800,
+  );
+}
+
+// M9.3: pantalla completa (F11). Tauri controla el fullscreen REAL del SO; nosotros
+// ocultamos el chrome custom (titlebar + statusbar) con la clase body.is-fullscreen. UNA
+// fuente de verdad: syncFullscreenChrome() lee el estado real y pinta el body, asi un toggle
+// por F11 y una salida por otra via quedan coherentes (Tauri NO expone evento de fullscreen).
+// Requiere core:window:allow-set-fullscreen + allow-is-fullscreen en capabilities/default.json;
+// sin ellos setFullscreen falla en silencio (mismo gotcha que allow-destroy con el cierre).
+async function syncFullscreenChrome(): Promise<void> {
+  try {
+    const fs = await appWindow.isFullscreen();
+    document.body.classList.toggle("is-fullscreen", fs);
+    if (!fs) document.body.classList.remove("reveal-chrome"); // al salir, limpia el hover
+  } catch {
+    /* no critico: si falla, el chrome simplemente no cambia */
+  }
+}
+
+// Guard reentrante (mismo patron que closeInProgress en el cierre de ventana): isFullscreen
+// es async, asi que dos cambios solapados (doble F11, autorepeat, o F11+Esc) leerian el MISMO
+// estado viejo y se pisarian, dejando el fullscreen "pegado". applyFullscreen serializa TODOS
+// los caminos (F11 togglea con target=undefined; Esc fuerza target=false) bajo el mismo guard.
+let fullscreenInProgress = false;
+async function applyFullscreen(target?: boolean): Promise<void> {
+  if (fullscreenInProgress) return;
+  fullscreenInProgress = true;
+  try {
+    const next = target ?? !(await appWindow.isFullscreen());
+    await appWindow.setFullscreen(next);
+  } catch {
+    flashStatus("no se pudo cambiar a pantalla completa", 3000);
+  } finally {
+    fullscreenInProgress = false;
+  }
+  await syncFullscreenChrome();
+}
+
+// Entrar/salir de fullscreen SIEMPRE redimensiona la ventana; onResized cubre cualquier
+// salida fuera de banda (Tauri no tiene un evento de fullscreen dedicado). Debounce: el
+// resize emite en rafaga al arrastrar el borde; sin debounce serian decenas de IPC
+// isFullscreen() por gesto. El cambio real (entrar/salir) lo aplica de inmediato
+// applyFullscreen (F11/Esc); aqui solo cubrimos la salida fuera de banda, ~150ms de retardo basta.
+let fsResizeTimer: number | undefined;
+void appWindow.onResized(() => {
+  if (fsResizeTimer !== undefined) clearTimeout(fsResizeTimer);
+  fsResizeTimer = window.setTimeout(() => void syncFullscreenChrome(), 150);
+});
+
+// Reveal-on-hover del borde superior: en fullscreen, al acercar el mouse arriba reaparece la
+// titlebar (paridad con el GtkRevealer del upstream) para mover/cerrar la ventana.
+const fsHoverZone = document.querySelector<HTMLElement>("#fs-hover-zone");
+fsHoverZone?.addEventListener("mouseenter", () => {
+  if (document.body.classList.contains("is-fullscreen")) {
+    document.body.classList.add("reveal-chrome");
+  }
+});
+document.querySelector(".titlebar")?.addEventListener("mouseleave", () => {
+  document.body.classList.remove("reveal-chrome");
+});
+
+// ¿Hay algo que Esc deba cerrar ANTES de salir de fullscreen? (paridad con el upstream, que
+// no oculta el chrome mientras la busqueda o un aviso esten visibles).
+function escHasPriorityTarget(): boolean {
+  if (!themeMenu.hidden) return true; // el menu de tema tiene su propio Esc (mas abajo)
+  if (view.dom.querySelector(".cm-search")) return true; // panel de busqueda CM6 abierto
+  if (document.querySelector(".spell-menu")) return true; // menu de sugerencias del corrector
+  return false;
+}
+
+// Atajos de los MODOS DE ESCRITURA a nivel WINDOW en fase CAPTURA. Captura (no bubble como el
+// handler de archivos de mas arriba) para ganarle a CodeMirror y a WebView2: los toggles
+// andan con o sin foco en el editor y no chocan con ningun binding del editor. En Windows
+// Ctrl+D/Ctrl+T no estan tomados por CM6 (sus bindings emacs son solo-Mac), pero capturamos
+// igual por robustez y consistencia.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    // F11: alterna pantalla completa. Ignora el autorepeat (mantener F11 presionado).
+    if (e.key === "F11") {
+      e.preventDefault();
+      if (e.repeat) return;
+      void applyFullscreen();
+      return;
+    }
+    // Esc: sale de fullscreen SOLO si estamos en fullscreen y no hay otro objetivo de Esc
+    // (menu de tema / panel de busqueda). Si no, no interceptamos: que actue quien corresponda.
+    if (
+      e.key === "Escape" &&
+      document.body.classList.contains("is-fullscreen") &&
+      !escHasPriorityTarget()
+    ) {
+      e.preventDefault();
+      void applyFullscreen(false); // serializado por el mismo guard que F11
+      return;
+    }
+    // Ctrl+D (enfoque) / Ctrl+T (Hemingway), sin Shift ni Alt.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === "d") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleFocusMode();
+      } else if (k === "t") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleHemingway();
+      }
+    }
+  },
+  true, // fase CAPTURA
+);
 
 // M8.4a: contrato del snapshot restaurado (espejo de RestoredSnapshot de Rust).
 interface RestoredSnapshot {
