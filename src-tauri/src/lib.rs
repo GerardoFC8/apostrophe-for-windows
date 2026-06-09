@@ -98,6 +98,17 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
     apostrophe_core::stats::count(&text)
 }
 
+/// M10: parser de resaltado de Markdown (ADR-0001 D1). CPU-bound (regex con backtracking
+/// sobre el documento completo) -> `spawn_blocking` para no bloquear el hilo de eventos,
+/// igual que `spellcheck`. Sin estado ni `focus_mode`: el highlight sigue activo en modo
+/// enfoque (el upstream mantiene los tags de markup; solo el corrector se apaga en foco).
+#[tauri::command]
+async fn parse_markup(text: String) -> Result<Vec<apostrophe_core::markup::Span>, String> {
+    tauri::async_runtime::spawn_blocking(move || apostrophe_core::markup::parse_markup(&text))
+        .await
+        .map_err(|e| format!("error al parsear el markup: {e}"))
+}
+
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
 // state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
@@ -981,6 +992,7 @@ pub fn run() {
             save_document_as,
             export_document,
             spellcheck,
+            parse_markup,
             take_pending_file,
             write_snapshot,
             take_pending_restore,

@@ -15,6 +15,7 @@
   --preview-bg: #ffffff;
   --preview-fg: #2e3436;
   --preview-code-bg: rgba(128, 128, 128, 0.12);
+  --md-marker: rgba(46, 52, 54, 0.45); /* M10: marcadores de markup atenuados */
 }
 
 [data-theme="dark"] {
@@ -30,6 +31,7 @@
   --preview-bg: #2d2d2d;
   --preview-fg: #deddda;
   --preview-code-bg: rgba(255, 255, 255, 0.08);
+  --md-marker: rgba(222, 221, 218, 0.45);
 }
 
 [data-theme="sepia"] {
@@ -45,6 +47,7 @@
   --preview-bg: #f4ecd8;
   --preview-fg: #5b4636;
   --preview-code-bg: rgba(91, 70, 54, 0.1);
+  --md-marker: rgba(91, 70, 54, 0.5);
 }
 
 * {
@@ -484,3 +487,55 @@ body.is-fullscreen.reveal-chrome .titlebar {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
+
+/* ====== M10: resaltado de Markdown ======================================
+   Los SPANS (qué es cada cosa y dónde) los calcula el núcleo Rust (parse_markup)
+   y llegan por IPC con debounce; aquí SOLO se PRESENTA. Aspecto fiel al
+   MarkupHandler del upstream (énfasis/negrita/tachado reales, código mono con
+   fondo tenue, marcadores de enlaces/imágenes atenuados), con UNA divergencia
+   elegida: los encabezados SÍ escalan el tamaño por nivel (jerarquía visual).
+   Las marks pueden anidarse: cada regla pisa SOLO su propiedad (weight, style,
+   color, fondo) para componer sin borrar el estilo de otra. */
+
+.cm-md-bold { font-weight: 700; }
+.cm-md-italic { font-style: italic; }
+.cm-md-bold-italic { font-weight: 700; font-style: italic; }
+.cm-md-strikethrough {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Código inline y fórmulas: fondo tenue (la fuente del editor ya es monoespaciada).
+   Reusa la var del código del preview, así cambia con el tema. */
+.cm-md-code,
+.cm-md-code-block {
+  background: var(--preview-code-bg);
+  border-radius: 4px;
+}
+.cm-md-code {
+  padding: 0 0.15em;
+}
+
+/* Marcadores de enlaces/imágenes ([ ]( ) ! <>): atenuados (paridad con el gray del
+   upstream). El TEXTO del enlace queda normal (legible). */
+.cm-md-marker { color: var(--md-marker); }
+
+/* Cita: secundaria (el upstream la sangra; aquí la atenuamos levemente). */
+.cm-md-blockquote { opacity: 0.75; }
+
+/* Regla horizontal (los --- / *** / ___): atenuada. */
+.cm-md-hr { opacity: 0.5; }
+
+/* Encabezados: negrita + escala por nivel (divergencia elegida vs el upstream, que
+   en el editor solo los pone en negrita). El span cubre la línea entera (incl. los #). */
+.cm-md-heading {
+  font-weight: 700;
+  line-height: 1.3;
+}
+.cm-md-h1 { font-size: 1.6em; }
+.cm-md-h2 { font-size: 1.35em; }
+.cm-md-h3 { font-size: 1.18em; }
+.cm-md-h4 { font-size: 1.08em; }
+.cm-md-h5 { font-size: 1em; }
+.cm-md-h6 { font-size: 0.92em; }
+/* ====================================================================== */

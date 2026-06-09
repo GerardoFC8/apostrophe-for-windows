@@ -14,6 +14,7 @@ import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { search, searchKeymap, openSearchPanel } from "@codemirror/search";
 import { spellcheckExtension, requestSpellCheck, clearSpellSpans } from "./spellcheck";
 import { focusCompartment, enableFocusDim, disableFocusDim } from "./focus-mode";
+import { markupExtension, requestMarkupHighlight } from "./markup-highlight";
 
 // M3: editor CodeMirror 6. M4: abrir/guardar .md. M5: temas light/dark/sepia +
 // export a HTML. La logica esta en Rust; la WebView solo PRESENTA. La frontera IPC
@@ -479,6 +480,7 @@ function scheduleUpdate(): void {
     void updateStats();
     void syncDoc();
     void requestSpellCheck(view, getText(), isFocusMode());
+    void requestMarkupHighlight(view, getText()); // M10: resaltado (sigue activo en focus)
   }, DEBOUNCE_MS);
 }
 
@@ -814,6 +816,9 @@ const view = new EditorView({
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
     editorTheme,
     spellcheckExtension,
+    // M10: resaltado de Markdown (spans del nucleo Rust). Va tras el spellcheck; sus marks
+    // pueden solaparse con las ondulitas y con el atenuado de focus sin conflicto.
+    markupExtension,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleUpdate();
     }),
@@ -827,6 +832,7 @@ void updateStats();
 // background). Cuando el dict termina de cargar, Rust emite "spell-dict-ready" y
 // re-chequeamos el doc actual — asi no hay que esperar al primer tecleo (review M6).
 void requestSpellCheck(view, getText(), isFocusMode());
+void requestMarkupHighlight(view, getText()); // M10: resaltado inicial (al abrir/restaurar)
 void listen("spell-dict-ready", () => {
   void requestSpellCheck(view, getText(), isFocusMode());
 });
