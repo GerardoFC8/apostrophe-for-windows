@@ -923,6 +923,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        // M11.1: preferencias persistentes (settings.json). El frontend lee/escribe via JS.
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(Mutex::new(DocumentStore::new()))
         .manage(SpellState(RwLock::new(None)))
         .manage(PendingFile(Mutex::new(None)))

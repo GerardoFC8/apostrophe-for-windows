@@ -16,6 +16,7 @@
     "core:window:allow-is-fullscreen",
     "window-state:default",
     "dialog:default",
+    "store:default",
     {
       "identifier": "shell:allow-execute",
       "allow": [

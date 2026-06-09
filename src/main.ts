@@ -15,6 +15,7 @@ import { search, searchKeymap, openSearchPanel } from "@codemirror/search";
 import { spellcheckExtension, requestSpellCheck, clearSpellSpans } from "./spellcheck";
 import { focusCompartment, enableFocusDim, disableFocusDim } from "./focus-mode";
 import { markupExtension, requestMarkupHighlight } from "./markup-highlight";
+import { getSetting, setSetting } from "./settings";
 
 // M3: editor CodeMirror 6. M4: abrir/guardar .md. M5: temas light/dark/sepia +
 // export a HTML. La logica esta en Rust; la WebView solo PRESENTA. La frontera IPC
@@ -421,6 +422,18 @@ async function exportDoc(): Promise<void> {
 let focusMode = false;
 const isFocusMode = (): boolean => focusMode;
 
+// M11.1: estado del corrector ortografico (toggle por F7), persistido en settings.json.
+// Es la FUENTE DE VERDAD del gating: TODO punto que pida spellcheck (debounce, arranque,
+// dict-ready, salida de enfoque) debe respetarlo, para que con el corrector apagado no
+// queden ondulitas ni se dispare ningun pedido.
+//
+// Arranca en FALSE a proposito: el valor real se lee de forma async de la preferencia (ver
+// el arranque del spellcheck, mas abajo). Mientras esa lectura vuela, un lector sincrono
+// (el debounce, o el listener "spell-dict-ready") podria adelantarsele; con el valor inicial
+// en false, en el peor caso el corrector arranca unos ms tarde (invisible, se corrige apenas
+// resuelve la lectura), NUNCA pinta una ondulita que la preferencia querria apagada.
+let spellcheckEnabled = false;
+
 // --- M8.4b: watcher de cambios externos ---
 
 function showExternalChangeBar(): void {
@@ -479,7 +492,9 @@ function scheduleUpdate(): void {
     void render();
     void updateStats();
     void syncDoc();
-    void requestSpellCheck(view, getText(), isFocusMode());
+    // M11.1: solo pedir el corrector si esta activado. Si esta apagado no pedimos nada
+    // (las ondulitas ya quedaron limpias al togglear); el resaltado es independiente.
+    if (spellcheckEnabled) void requestSpellCheck(view, getText(), isFocusMode());
     void requestMarkupHighlight(view, getText()); // M10: resaltado (sigue activo en focus)
   }, DEBOUNCE_MS);
 }
@@ -828,13 +843,21 @@ const view = new EditorView({
 applyTheme(getInitialTheme()); // fija el tema antes del primer render (sin flash)
 void render();
 void updateStats();
-// Spellcheck inicial (puede volver [] si el diccionario aun se esta cargando en
-// background). Cuando el dict termina de cargar, Rust emite "spell-dict-ready" y
-// re-chequeamos el doc actual — asi no hay que esperar al primer tecleo (review M6).
-void requestSpellCheck(view, getText(), isFocusMode());
+// M11.1: ARRANQUE SIN PARPADEO. Leemos la preferencia del corrector ANTES del primer
+// pedido: si quedo apagado, no pedimos nada y el editor arranca sin ondulitas (sin el
+// flash de pintarlas para luego limpiarlas). El spellcheck inicial puede volver [] si el
+// diccionario aun se esta cargando en background; cuando termina, Rust emite
+// "spell-dict-ready" y re-chequeamos el doc actual — asi no hay que esperar al primer
+// tecleo (review M6).
+void (async () => {
+  spellcheckEnabled = await getSetting("spellcheck");
+  if (spellcheckEnabled) void requestSpellCheck(view, getText(), isFocusMode());
+})();
 void requestMarkupHighlight(view, getText()); // M10: resaltado inicial (al abrir/restaurar)
 void listen("spell-dict-ready", () => {
-  void requestSpellCheck(view, getText(), isFocusMode());
+  // Solo re-chequear si el corrector esta activado: si esta apagado, que cargue el dict
+  // tarde no debe repintar ondulitas.
+  if (spellcheckEnabled) void requestSpellCheck(view, getText(), isFocusMode());
 });
 
 // --- M13: control de vista (solo editor / dividido / solo vista) ---
@@ -909,9 +932,26 @@ function toggleFocusMode(): void {
   } else {
     disableFocusDim(view);
     setViewMode(viewBeforeFocus); // restaura la vista que habia antes del enfoque (round-trip M13)
-    void requestSpellCheck(view, getText(), false); // salir: repinta el spellcheck
+    // Salir del enfoque: repinta el corrector SOLO si esta activado. Con el corrector
+    // apagado, salir de enfoque NO debe hacer reaparecer ninguna ondulita (M11.1).
+    if (spellcheckEnabled) void requestSpellCheck(view, getText(), false);
   }
   flashStatus(focusMode ? "Modo enfoque activado" : "Modo enfoque desactivado", 1500);
+}
+
+// M11.1: alterna el corrector ortografico (F7, paridad con el upstream). Persiste el nuevo
+// estado en settings.json (fire-and-forget: persistir no es critico) y sincroniza las
+// ondulitas: al activarlo re-chequea el doc actual (salvo en modo enfoque, donde el
+// corrector se apaga por diseno — ADR-0001 D2); al desactivarlo limpia las ondulitas ya.
+function toggleSpellcheck(): void {
+  spellcheckEnabled = !spellcheckEnabled;
+  void setSetting("spellcheck", spellcheckEnabled);
+  if (spellcheckEnabled && !isFocusMode()) {
+    void requestSpellCheck(view, getText(), false);
+  } else {
+    clearSpellSpans(view);
+  }
+  flashStatus(spellcheckEnabled ? "Corrector activado" : "Corrector desactivado", 1500);
 }
 
 // M9.2: alterna el modo Hemingway reconfigurando el compartment del changeFilter en
@@ -1009,6 +1049,14 @@ window.addEventListener(
       e.preventDefault();
       if (e.repeat) return;
       void applyFullscreen();
+      return;
+    }
+    // F7: alterna el corrector ortografico (paridad con el upstream Apostrophe). Sin ctrl,
+    // en CAPTURA igual que F11 para que funcione con o sin foco en el editor.
+    if (e.key === "F7") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggleSpellcheck();
       return;
     }
     // Esc: sale de fullscreen SOLO si estamos en fullscreen y no hay otro objetivo de Esc
