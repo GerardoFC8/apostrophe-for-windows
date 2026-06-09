@@ -837,6 +837,60 @@ void listen("spell-dict-ready", () => {
   void requestSpellCheck(view, getText(), isFocusMode());
 });
 
+// --- M13: control de vista (solo editor / dividido / solo vista) ---
+// Tres estados, paridad con el upstream Apostrophe: "editor" (solo el editor), "split"
+// (editor + preview lado a lado, el default validado) y "preview" (solo la vista renderizada).
+// El CSS de cada estado vive en styles.css (body.view-editor/view-split/view-preview); aqui
+// solo se gestiona el estado y se sincroniza la clase del body + el resaltado de los botones.
+type ViewMode = "editor" | "split" | "preview";
+const VIEW_CLASS: Record<ViewMode, string> = {
+  editor: "view-editor",
+  split: "view-split",
+  preview: "view-preview",
+};
+const VIEW_ORDER: ViewMode[] = ["editor", "split", "preview"];
+
+let viewMode: ViewMode = "split";
+// Recuerda la vista previa al entrar al modo enfoque, para restaurarla al salir (round-trip).
+let viewBeforeFocus: ViewMode = "split";
+const viewBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-view]"));
+
+// Aplica un modo de vista: una sola fuente de verdad para la clase del body, el estado de los
+// botones y el reenfoque del editor. Quita las tres clases y pone solo la del modo actual, asi
+// nunca quedan dos activas a la vez.
+function setViewMode(m: ViewMode): void {
+  viewMode = m;
+  document.body.classList.remove("view-editor", "view-split", "view-preview");
+  document.body.classList.add(VIEW_CLASS[m]);
+  for (const btn of viewBtns) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.view === m));
+  }
+  // Al volver a un modo donde el editor es visible (editor/split), re-enfocarlo: si veniamos de
+  // "preview" el editor estaba oculto y habia perdido el foco. En "preview" no enfocamos nada
+  // (el editor sigue vivo en el DOM, solo display:none — CM6 no se destruye).
+  if (m !== "preview") view.focus();
+}
+
+// Cicla editor -> split -> preview -> editor (Ctrl+P, paridad con el upstream). El modo enfoque
+// es DUEÑO de la vista (fuerza solo-editor): mientras este activo, ignoramos el ciclo.
+function cycleViewMode(): void {
+  if (focusMode) return;
+  const next = VIEW_ORDER[(VIEW_ORDER.indexOf(viewMode) + 1) % VIEW_ORDER.length];
+  setViewMode(next);
+}
+
+// Clic directo en los botones de la barra. Igual que el ciclo: el enfoque manda, asi que si esta
+// activo el clic no hace nada (el CSS ademas los bloquea con pointer-events: none).
+for (const btn of viewBtns) {
+  btn.addEventListener("click", () => {
+    if (focusMode) return;
+    setViewMode(btn.dataset.view as ViewMode);
+  });
+}
+
+// Estado inicial: split (el default validado). Fija la clase del body y el resaltado del boton.
+setViewMode("split");
+
 // --- M9: modos de escritura (enfoque / Hemingway / pantalla completa) ---
 
 // M9.1: alterna el modo enfoque. Activa/desactiva el atenuado por parrafo (./focus-mode),
@@ -847,10 +901,14 @@ function toggleFocusMode(): void {
   focusMode = !focusMode;
   document.body.classList.toggle("focus-mode", focusMode);
   if (focusMode) {
+    // El enfoque fuerza solo-editor: recordamos la vista actual para restaurarla al salir (M13).
+    viewBeforeFocus = viewMode;
+    setViewMode("editor");
     enableFocusDim(view);
     clearSpellSpans(view); // entrar: apaga las ondulitas
   } else {
     disableFocusDim(view);
+    setViewMode(viewBeforeFocus); // restaura la vista que habia antes del enfoque (round-trip M13)
     void requestSpellCheck(view, getText(), false); // salir: repinta el spellcheck
   }
   flashStatus(focusMode ? "Modo enfoque activado" : "Modo enfoque desactivado", 1500);
@@ -975,6 +1033,13 @@ window.addEventListener(
         e.preventDefault();
         e.stopImmediatePropagation();
         toggleHemingway();
+      } else if (k === "p") {
+        // M13: Ctrl+P cicla la vista (editor -> dividido -> solo vista). El preventDefault es
+        // CRITICO: en WebView2/Windows Ctrl+P abre el dialogo de IMPRESION del navegador; sin
+        // esto el ciclo de vista quedaria tapado por el print preview.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        cycleViewMode();
       }
     }
   },
