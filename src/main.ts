@@ -20,6 +20,16 @@ import { spellcheckExtension, requestSpellCheck, clearSpellSpans } from "./spell
 import { focusCompartment, enableFocusDim, disableFocusDim } from "./focus-mode";
 import { markupExtension, requestMarkupHighlight } from "./markup-highlight";
 import { getSetting, setSetting } from "./settings";
+import {
+  LOCALES,
+  LOCALE_LABEL,
+  detectLocale,
+  getLocale,
+  setLocale,
+  t,
+  tp,
+  type Locale,
+} from "./i18n";
 
 // M3: editor CodeMirror 6. M4: abrir/guardar .md. M5: temas light/dark/sepia +
 // export a HTML. La logica esta en Rust; la WebView solo PRESENTA. La frontera IPC
@@ -105,11 +115,11 @@ void appWindow.onCloseRequested(async (event) => {
   closeInProgress = true;
   let proceed = false;
   try {
-    proceed = await invoke<boolean>("confirm_close", { text: getText() });
+    proceed = await invoke<boolean>("confirm_close", { text: getText(), labels: labelsFor("close") });
   } catch {
     // ante un error en el chequeo NO cerramos silenciosamente (podríamos perder datos):
     // dejamos la ventana abierta y lo hacemos VISIBLE para que el usuario guarde a mano.
-    flashStatus("no se pudo verificar los cambios — guarda con Ctrl+S antes de cerrar", 4000);
+    flashStatus(t("status.dirtyCheckFailed"), 4000);
     closeInProgress = false;
     return;
   }
@@ -119,7 +129,7 @@ void appWindow.onCloseRequested(async (event) => {
     } catch {
       // si el cierre fallara, no dejar la ventana trabada: permitir reintentar.
       closeInProgress = false;
-      flashStatus("no se pudo cerrar la ventana — reintenta", 4000);
+      flashStatus(t("status.closeFailed"), 4000);
     }
   } else {
     closeInProgress = false; // el usuario canceló: permitir un futuro intento de cierre
@@ -152,7 +162,10 @@ window.addEventListener("keydown", (e) => {
 // --- M5: temas (light / dark / sepia) ---
 const THEMES = ["light", "dark", "sepia"] as const;
 type Theme = (typeof THEMES)[number];
-const THEME_LABEL: Record<Theme, string> = { light: "Claro", dark: "Oscuro", sepia: "Sepia" };
+// Las etiquetas de tema se resuelven en cada llamada (no en una constante): al cambiar de
+// idioma el menu se reconstruye y tiene que leer el catalogo nuevo.
+const themeLabel = (theme: Theme): string =>
+  ({ light: t("theme.light"), dark: t("theme.dark"), sepia: t("theme.sepia") })[theme];
 
 // Iconos SVG (stroke = currentColor, heredan el color del tema). Sol / luna / libro.
 const ICON: Record<Theme, string> = {
@@ -226,7 +239,7 @@ function applyTheme(theme: Theme): void {
   localStorage.setItem("theme", theme);
   // Reflejar en el trigger del selector y marcar el item activo del menu.
   themeTriggerIcon.innerHTML = ICON[theme];
-  themeTriggerLabel.textContent = THEME_LABEL[theme];
+  themeTriggerLabel.textContent = themeLabel(theme);
   themeMenu.querySelectorAll<HTMLElement>(".theme-item").forEach((item) => {
     item.setAttribute("aria-checked", String(item.dataset.theme === theme));
   });
@@ -234,13 +247,103 @@ function applyTheme(theme: Theme): void {
   if (lastPreviewHtml) preview.srcdoc = withTheme(lastPreviewHtml);
 }
 
+// Etiquetas de los dialogos nativos de confirmacion. Se arman aca y viajan por IPC:
+// el backend no guarda copia (ADR-0001), asi sumar un idioma no toca Rust. Se resuelven
+// en cada llamada, no una vez, para que respeten el idioma activo en ese momento.
+const confirmLabels = (kind: "open" | "close" | "new") =>
+  ({
+    open: {
+      title: t("confirm.openTitle"),
+      message: t("confirm.openMessage"),
+      confirm: t("confirm.openConfirm"),
+    },
+    close: {
+      title: t("confirm.closeTitle"),
+      message: t("confirm.closeMessage"),
+      confirm: t("confirm.closeConfirm"),
+    },
+    new: {
+      title: t("confirm.newTitle"),
+      message: t("confirm.openMessage"), // mismo aviso: se pierde el documento actual
+      confirm: t("confirm.newConfirm"),
+    },
+  })[kind] as { title: string; message: string; confirm: string } & { cancel?: string };
+
+/// Igual que `confirmLabels` pero con el boton Cancelar ya incluido (lo que espera Rust).
+const labelsFor = (kind: "open" | "close" | "new") => ({
+  ...confirmLabels(kind),
+  cancel: t("confirm.cancel"),
+});
+
+// Check del item activo, compartido por el menu de temas y el de idiomas.
+const CHECK_ICON =
+  '<svg class="check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4 L5 8.9 L9.5 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// --- M15: idioma ---
+
+const langItems = document.querySelector<HTMLElement>("#lang-items")!;
+
+// Vuelca el catalogo sobre el DOM estatico. Cada nodo declara su clave en index.html:
+// data-i18n (contenido), data-i18n-title y data-i18n-aria-label (atributos). Se llama al
+// arrancar y en cada cambio de idioma, asi el repintado es uno solo y no queda texto viejo.
+function applyTranslations(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n as Parameters<typeof t>[0]);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
+    el.title = t(el.dataset.i18nTitle as Parameters<typeof t>[0]);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((el) => {
+    el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel as Parameters<typeof t>[0]));
+  });
+}
+
+// Los nombres de idioma NO pasan por el catalogo: cada uno va escrito en su propio idioma.
+function buildLanguageMenu(): void {
+  langItems.innerHTML = LOCALES.map(
+    (locale) =>
+      `<button class="theme-item" type="button" role="menuitemradio" data-locale="${locale}" aria-checked="false">` +
+      `<span>${LOCALE_LABEL[locale]}</span>${CHECK_ICON}</button>`
+  ).join("");
+  langItems.querySelectorAll<HTMLButtonElement>(".theme-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      void applyLocale(item.dataset.locale as Locale, true);
+      closeAppMenu();
+    });
+  });
+}
+
+// Cambia el idioma y repinta TODO lo que depende del catalogo: el DOM estatico, los dos
+// menus (que se generan por JS) y los contadores. `persist` distingue la eleccion del
+// usuario del arranque: al arrancar no se escribe la preferencia, para no fijar un idioma
+// que en realidad venia del sistema.
+async function applyLocale(locale: Locale, persist: boolean): Promise<void> {
+  setLocale(locale);
+  applyTranslations();
+  buildThemeMenu();
+  buildLanguageMenu();
+  // El tema activo ya vive en el dataset de <html>: reaplicarlo actualiza la etiqueta del
+  // trigger y el check del item, que acaban de reconstruirse con el catalogo nuevo.
+  applyTheme((document.documentElement.dataset.theme as Theme) ?? "light");
+  markActiveLocale();
+  updateTitlebar(lastFileName, lastDirty);
+  void updateStats();
+  if (persist) await setSetting("language", locale);
+}
+
+function markActiveLocale(): void {
+  langItems.querySelectorAll<HTMLElement>(".theme-item").forEach((item) => {
+    item.setAttribute("aria-checked", String(item.dataset.locale === getLocale()));
+  });
+}
+
 // Construye el menu del selector: un item por tema (icono + label + check del activo).
 function buildThemeMenu(): void {
   themeMenu.innerHTML = THEMES.map(
-    (t) =>
-      `<button class="theme-item" type="button" role="menuitemradio" data-theme="${t}" aria-checked="false">` +
-      `<span class="theme-item-icon">${ICON[t]}</span><span>${THEME_LABEL[t]}</span>` +
-      '<svg class="check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4 L5 8.9 L9.5 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+    (theme) =>
+      `<button class="theme-item" type="button" role="menuitemradio" data-theme="${theme}" aria-checked="false">` +
+      `<span class="theme-item-icon">${ICON[theme]}</span><span>${themeLabel(theme)}</span>` +
+      CHECK_ICON +
       "</button>"
   ).join("");
   themeMenu.querySelectorAll<HTMLButtonElement>(".theme-item").forEach((item) => {
@@ -275,6 +378,11 @@ document.addEventListener("keydown", (e) => {
 // Esc sale de fullscreen) lo integra vía escHasPriorityTarget para respetar la prioridad.
 
 exportBtn.addEventListener("click", () => void exportDoc());
+
+// M15: el idioma se fija ANTES de construir cualquier menu, porque las etiquetas salen del
+// catalogo. Arranca con el del sistema (sincrono, sin parpadeo); la preferencia guardada se
+// aplica mas abajo, en el arranque asincrono, y solo repinta si el usuario eligio otro.
+setLocale(detectLocale());
 
 buildThemeMenu();
 
@@ -463,16 +571,14 @@ const editorTheme = EditorView.theme({
 
 let timer: number | undefined;
 
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
+// Las unidades (h/min/s) no se traducen: son simbolos y coinciden en ambos idiomas. Lo que
+// si cambia es la frase que las envuelve, que sale del catalogo.
 function formatReadTime(rt: ReadTime): string {
   const parts: string[] = [];
   if (rt.hours) parts.push(`${rt.hours} h`);
   if (rt.minutes) parts.push(`${rt.minutes} min`);
   parts.push(`${rt.seconds} s`);
-  return `${parts.join(" ")} de lectura`;
+  return t("stats.readtime", { time: parts.join(" ") });
 }
 
 // Escapa HTML para no inyectar markup al mostrar errores en el iframe del preview.
@@ -494,8 +600,15 @@ function setEditorText(text: string): void {
 }
 
 // Titlebar: nombre del archivo (o "Sin título") + indicador ● de cambios sin guardar.
+// Se recuerda el ultimo estado para poder repintar la barra al cambiar de idioma sin
+// volver a preguntarle al backend por el documento (el nombre "Sin título" es traducible).
+let lastFileName: string | null = null;
+let lastDirty = false;
+
 function updateTitlebar(fileName: string | null, dirty: boolean): void {
-  const name = fileName || "Sin título";
+  lastFileName = fileName;
+  lastDirty = dirty;
+  const name = fileName || t("doc.untitled");
   docName.textContent = dirty ? `${name} ●` : name;
 }
 
@@ -519,7 +632,7 @@ async function render(): Promise<void> {
     lastPreviewHtml = html;
     preview.srcdoc = withTheme(html);
   } catch (err) {
-    flashStatus("error de preview", 4000);
+    flashStatus(t("status.previewFailed"), 4000);
     preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;
   }
 }
@@ -527,13 +640,13 @@ async function render(): Promise<void> {
 async function updateStats(): Promise<void> {
   try {
     const s = await invoke<Stats>("count_stats", { text: getText() });
-    statWords.textContent = plural(s.words, "palabra", "palabras");
-    statChars.textContent = plural(s.characters, "carácter", "caracteres");
-    statSentences.textContent = plural(s.sentences, "oración", "oraciones");
-    statParagraphs.textContent = plural(s.paragraphs, "párrafo", "párrafos");
+    statWords.textContent = tp("stats.words", s.words);
+    statChars.textContent = tp("stats.chars", s.characters);
+    statSentences.textContent = tp("stats.sentences", s.sentences);
+    statParagraphs.textContent = tp("stats.paragraphs", s.paragraphs);
     statReadTime.textContent = formatReadTime(s.read_time);
   } catch (err) {
-    statWords.textContent = `error: ${String(err)}`;
+    statWords.textContent = `${t("error.generic")}: ${String(err)}`;
   }
 }
 
@@ -552,26 +665,26 @@ async function syncDoc(): Promise<void> {
 // descartar el documento actual.
 async function newDoc(): Promise<void> {
   try {
-    const st = await invoke<DocStatus | null>("new_document", { text: getText() });
+    const st = await invoke<DocStatus | null>("new_document", { text: getText(), labels: labelsFor("new") });
     if (!st) return; // cancelado (el usuario eligió NO descartar)
     setEditorText("");
     updateTitlebar(st.file_name, st.dirty);
-    flashStatus("documento nuevo");
+    flashStatus(t("status.newDoc"));
   } catch (err) {
-    flashStatus(`error: ${String(err)}`, 4000);
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
   }
 }
 
 // M4: abrir un .md (dialogo nativo). El Rust confirma si hay cambios sin guardar.
 async function openDoc(): Promise<void> {
   try {
-    const opened = await invoke<OpenedDoc | null>("open_document");
+    const opened = await invoke<OpenedDoc | null>("open_document", { labels: labelsFor("open") });
     if (!opened) return; // cancelado (o se eligio NO descartar cambios)
     setEditorText(opened.content);
     updateTitlebar(opened.file_name, false);
-    flashStatus("abierto");
+    flashStatus(t("status.opened"));
   } catch (err) {
-    flashStatus(`error al abrir: ${String(err)}`, 4000);
+    flashStatus(`${t("error.open")}: ${String(err)}`, 4000);
   }
 }
 
@@ -581,9 +694,9 @@ async function saveDoc(): Promise<void> {
     const st = await invoke<DocStatus | null>("save_document", { text: getText() });
     if (!st) return; // cancelado
     updateTitlebar(st.file_name, st.dirty);
-    flashStatus("guardado");
+    flashStatus(t("status.saved"));
   } catch (err) {
-    flashStatus(`error al guardar: ${String(err)}`, 4000);
+    flashStatus(`${t("error.save")}: ${String(err)}`, 4000);
   }
 }
 
@@ -593,9 +706,9 @@ async function saveDocAs(): Promise<void> {
     const st = await invoke<DocStatus | null>("save_document_as", { text: getText() });
     if (!st) return; // cancelado
     updateTitlebar(st.file_name, st.dirty);
-    flashStatus("guardado");
+    flashStatus(t("status.saved"));
   } catch (err) {
-    flashStatus(`error al guardar: ${String(err)}`, 4000);
+    flashStatus(`${t("error.save")}: ${String(err)}`, 4000);
   }
 }
 
@@ -603,7 +716,7 @@ async function saveDocAs(): Promise<void> {
 // lo decide la extension que elijas en el dialogo; el backend la traduce y avisa si no
 // esta soportada.
 async function exportDoc(): Promise<void> {
-  status.textContent = "exportando…"; // en-progreso (sin auto-limpiar hasta terminar)
+  status.textContent = t("status.exporting"); // en-progreso (sin auto-limpiar hasta terminar)
   try {
     const { css, accent } = exportTheme();
     const out = await invoke<string | null>("export_document", {
@@ -611,10 +724,10 @@ async function exportDoc(): Promise<void> {
       css,
       accent,
     });
-    if (out) flashStatus("exportado");
+    if (out) flashStatus(t("status.exported"));
     else status.textContent = ""; // cancelado
   } catch (err) {
-    flashStatus(`error al exportar: ${String(err)}`, 4000);
+    flashStatus(`${t("error.export")}: ${String(err)}`, 4000);
   }
 }
 
@@ -672,7 +785,7 @@ void listen("file-changed-on-disk", async () => {
   if (!dirty) {
     // Sin cambios locales: recargar directo es seguro (el usuario no pierde nada).
     await reloadFromDisk();
-    flashStatus("El archivo cambió en disco — recargado", 4000);
+    flashStatus(t("status.changedOnDisk"), 4000);
   } else {
     // Con cambios locales sin guardar: mostrar el infobar (eleccion explicita del usuario).
     showExternalChangeBar();
@@ -681,7 +794,7 @@ void listen("file-changed-on-disk", async () => {
 
 // Botones del infobar.
 reloadBtn.addEventListener("click", () => {
-  void reloadFromDisk().then(() => flashStatus("Archivo recargado desde disco", 3000));
+  void reloadFromDisk().then(() => flashStatus(t("status.reloaded"), 3000));
 });
 keepBtn.addEventListener("click", () => {
   // El usuario elige mantener sus cambios; el proximo Ctrl+S sobrescribira el cambio externo.
@@ -995,7 +1108,7 @@ const hemingwayFilter = EditorState.changeFilter.of((tr) => {
   // timer en cada tecla del autorepeat para que el mensaje no se quede pegado.
   const now = performance.now();
   if (now - lastHemingwayNotice > 1200) {
-    flashStatus("El texto no se puede borrar en modo Hemingway");
+    flashStatus(t("status.hemingway"));
     lastHemingwayNotice = now;
   }
   // CM6 descarta los cambios (el texto se conserva); la seleccion del usuario colapsa a
@@ -1043,6 +1156,18 @@ const view = new EditorView({
 });
 
 applyTheme(getInitialTheme()); // fija el tema antes del primer render (sin flash)
+// M15: vuelca el catalogo sobre el DOM estatico y arma el selector de idioma. El idioma ya
+// quedo fijado arriba (el del sistema); aca solo se pinta.
+applyTranslations();
+buildLanguageMenu();
+markActiveLocale();
+// Preferencia guardada: solo repinta si el usuario habia elegido un idioma distinto al del
+// sistema. `persist: false` — al arrancar no se reescribe la preferencia, para no fijar como
+// eleccion manual algo que en realidad vino del sistema.
+void (async () => {
+  const saved = await getSetting("language");
+  if (saved && saved !== getLocale()) await applyLocale(saved, false);
+})();
 void render();
 void updateStats();
 // M11.1: ARRANQUE SIN PARPADEO. Leemos la preferencia del corrector ANTES del primer
@@ -1199,7 +1324,7 @@ async function applyFullscreen(target?: boolean): Promise<void> {
     const next = target ?? !(await appWindow.isFullscreen());
     await appWindow.setFullscreen(next);
   } catch {
-    flashStatus("no se pudo cambiar a pantalla completa", 3000);
+    flashStatus(t("status.fullscreenFailed"), 3000);
   } finally {
     fullscreenInProgress = false;
   }
@@ -1346,7 +1471,7 @@ void (async () => {
       // Marcar como modificado de inmediato (el store arranca vacio; el debounce lo
       // marcaria en el primer cambio, pero queremos el indicador visible desde ya).
       updateTitlebar(restored.original_file_name ?? null, true);
-      flashStatus("Se restauró trabajo no guardado de la sesión anterior", 5000);
+      flashStatus(t("status.restored"), 5000);
     }
   } catch {
     /* no critico: si falla, la app queda con el editor vacio */
@@ -1367,12 +1492,12 @@ void listen("autosave-tick", () => {
 // evento. open_path aplica el guard anti-perdida (confirma si hay cambios sin guardar).
 void listen<string>("open-file-path", async (event) => {
   try {
-    const opened = await invoke<OpenedDoc | null>("open_path", { path: event.payload });
+    const opened = await invoke<OpenedDoc | null>("open_path", { path: event.payload, labels: labelsFor("open") });
     if (!opened) return; // cancelado por el guard de cambios sin guardar
     setEditorText(opened.content);
     updateTitlebar(opened.file_name, false);
-    flashStatus("abierto");
+    flashStatus(t("status.opened"));
   } catch (err) {
-    flashStatus(`error al abrir: ${String(err)}`, 4000);
+    flashStatus(`${t("error.open")}: ${String(err)}`, 4000);
   }
 });

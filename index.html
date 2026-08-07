@@ -8,37 +8,48 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
+  <!-- M15: la copia visible NO se escribe aquí. Cada nodo traducible lleva data-i18n
+       (contenido), data-i18n-title o data-i18n-aria-label (atributos); main.ts los
+       resuelve contra el catálogo de src/i18n.ts al arrancar y al cambiar de idioma.
+       El atributo lang de <html> también lo fija i18n.setLocale. -->
   <body>
     <!-- M9.3: zona detectora del borde superior. En pantalla completa, al acercar el
          mouse aquí reaparece la titlebar (paridad con el GtkRevealer del upstream). -->
     <div id="fs-hover-zone" aria-hidden="true"></div>
     <header class="titlebar" data-tauri-drag-region>
       <span class="brand" data-tauri-drag-region>Apostrophe</span>
-      <span id="doc-name" class="doc-name" data-tauri-drag-region>Sin título</span>
+      <span id="doc-name" class="doc-name" data-tauri-drag-region data-i18n="doc.untitled"></span>
       <span id="status" class="status" data-tauri-drag-region></span>
       <!-- M11: menú hamburguesa. Mismo patrón de popover que .theme-select: un trigger
            (.bar-btn) que togglea un popover role=menu oculto. Abre la ventana de atajos
            y el diálogo Acerca de (ambos overlays modales más abajo). -->
       <div class="menu-select">
-        <button class="bar-btn menu-trigger" id="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" title="Menú">
+        <button class="bar-btn menu-trigger" id="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="menu.open">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true">
             <path d="M2.5 4 H13.5 M2.5 8 H13.5 M2.5 12 H13.5" />
           </svg>
         </button>
         <div class="app-menu theme-menu" id="app-menu" role="menu" hidden>
           <button class="menu-item" id="menu-shortcuts" type="button" role="menuitem" aria-haspopup="dialog" aria-keyshortcuts="Control+?">
-            <span>Atajos de teclado</span>
+            <span data-i18n="menu.shortcuts"></span>
             <span class="menu-hint"><kbd>Ctrl</kbd>+<kbd>?</kbd></span>
           </button>
           <button class="menu-item" id="menu-about" type="button" role="menuitem" aria-haspopup="dialog">
-            <span>Acerca de</span>
+            <span data-i18n="menu.about"></span>
           </button>
+          <!-- M15: selector de idioma. Los items los construye main.ts (buildLanguageMenu)
+               reusando .theme-item, que ya trae el check del activo. Los nombres de idioma
+               NO se traducen: cada uno va en su propio idioma, para que quien no entienda
+               el idioma actual igual reconozca el suyo. -->
+          <div class="menu-sep" role="separator"></div>
+          <div class="menu-label" data-i18n="menu.language"></div>
+          <div id="lang-items" role="group"></div>
         </div>
       </div>
       <div class="theme-select">
-        <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" title="Tema">
+        <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="theme.open">
           <span class="theme-trigger-icon" id="theme-trigger-icon"></span>
-          <span id="theme-trigger-label">Claro</span>
+          <span id="theme-trigger-label"></span>
           <svg class="chevron" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M2.2 3.6 L5 6.4 L7.8 3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
@@ -48,39 +59,39 @@
       <!-- M13: control de vista de 3 estados (solo editor / dividido / solo vista). Ctrl+P cicla
            entre ellos; estos botones permiten el clic directo. SVG inline (sin fuente de iconos)
            coherente con el resto del chrome. El boton activo se resalta via aria-pressed (CSS). -->
-      <div class="view-control" role="group" aria-label="Vista">
-        <button class="bar-btn view-btn" data-view="editor" type="button" title="Solo editor" aria-pressed="false">
+      <div class="view-control" role="group" data-i18n-aria-label="view.group">
+        <button class="bar-btn view-btn" data-view="editor" type="button" data-i18n-title="view.editor" aria-pressed="false">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="2" width="10" height="12" rx="1.5" />
             <path d="M5.5 5.5 H10.5 M5.5 8 H10.5 M5.5 10.5 H8.5" />
           </svg>
         </button>
-        <button class="bar-btn view-btn" data-view="split" type="button" title="Dividido (editor y vista)" aria-pressed="true">
+        <button class="bar-btn view-btn" data-view="split" type="button" data-i18n-title="view.split" aria-pressed="true">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">
             <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
             <path d="M8 3 V13" />
           </svg>
         </button>
-        <button class="bar-btn view-btn" data-view="preview" type="button" title="Solo vista — Ctrl+P cicla" aria-pressed="false">
+        <button class="bar-btn view-btn" data-view="preview" type="button" data-i18n-title="view.preview" aria-pressed="false">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M1.5 8 C3 4.5 6 3 8 3 C10 3 13 4.5 14.5 8 C13 11.5 10 13 8 13 C6 13 3 11.5 1.5 8 Z" />
             <circle cx="8" cy="8" r="2" />
           </svg>
         </button>
       </div>
-      <button class="bar-btn" id="export-btn" type="button" title="Exportar a PDF, HTML, ODT, DOCX, EPUB o LaTeX (Ctrl+E)">Exportar</button>
+      <button class="bar-btn" id="export-btn" type="button" data-i18n-title="export.hint" data-i18n="export.action"></button>
       <div class="window-controls">
-        <button class="win-btn" id="win-min" type="button" aria-label="Minimizar" title="Minimizar">
+        <button class="win-btn" id="win-min" type="button" data-i18n-aria-label="window.minimize" data-i18n-title="window.minimize">
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M0 5 H10" stroke="currentColor" stroke-width="1" />
           </svg>
         </button>
-        <button class="win-btn" id="win-max" type="button" aria-label="Maximizar" title="Maximizar">
+        <button class="win-btn" id="win-max" type="button" data-i18n-aria-label="window.maximize" data-i18n-title="window.maximize">
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
           </svg>
         </button>
-        <button class="win-btn win-close" id="win-close" type="button" aria-label="Cerrar" title="Cerrar">
+        <button class="win-btn win-close" id="win-close" type="button" data-i18n-aria-label="window.close" data-i18n-title="window.close">
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1" />
           </svg>
@@ -90,10 +101,10 @@
     <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo cambia en disco
          mientras hay cambios locales sin guardar. NO modal: el editor sigue activo. -->
     <div id="external-change-bar" class="external-change-bar" hidden>
-      <span class="external-change-msg">El archivo cambió en disco.</span>
+      <span class="external-change-msg" data-i18n="external.message"></span>
       <div class="external-change-actions">
-        <button id="reload-btn" class="bar-btn" type="button">Recargar y perder mis cambios</button>
-        <button id="keep-btn" class="bar-btn" type="button">Mantener mis cambios</button>
+        <button id="reload-btn" class="bar-btn" type="button" data-i18n="external.reload"></button>
+        <button id="keep-btn" class="bar-btn" type="button" data-i18n="external.keep"></button>
       </div>
     </div>
     <main class="split">
@@ -101,14 +112,17 @@
       <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
            acceder a window.parent.__TAURI__ (cierra XSS via .md malicioso). allow-scripts
            deja correr MathJax. -->
-      <iframe id="preview" class="preview" title="preview" sandbox="allow-scripts"></iframe>
+      <iframe id="preview" class="preview" data-i18n-title="view.previewFrame" sandbox="allow-scripts"></iframe>
     </main>
+    <!-- Los contadores los rellena updateStats (main.ts) con las formas plurales del
+         catálogo; arrancan vacíos para no mostrar un idioma equivocado antes del primer
+         render. -->
     <footer class="statusbar">
-      <span id="stat-words">0 palabras</span>
-      <span id="stat-chars">0 caracteres</span>
-      <span id="stat-sentences">0 oraciones</span>
-      <span id="stat-paragraphs">0 párrafos</span>
-      <span id="stat-readtime">0 s de lectura</span>
+      <span id="stat-words"></span>
+      <span id="stat-chars"></span>
+      <span id="stat-sentences"></span>
+      <span id="stat-paragraphs"></span>
+      <span id="stat-readtime"></span>
     </footer>
 
     <!-- M11: overlay modal de atajos de teclado. Backdrop a pantalla completa + panel
@@ -119,8 +133,8 @@
       <div class="overlay-backdrop"></div>
       <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
         <header class="overlay-header">
-          <h2 id="shortcuts-title" class="overlay-title">Atajos de teclado</h2>
-          <button class="overlay-close" id="shortcuts-close" type="button" aria-label="Cerrar">
+          <h2 id="shortcuts-title" class="overlay-title" data-i18n="shortcuts.title"></h2>
+          <button class="overlay-close" id="shortcuts-close" type="button" data-i18n-aria-label="common.close">
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
               <path d="M1 1 L13 13 M13 1 L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
             </svg>
@@ -128,53 +142,53 @@
         </header>
         <div class="overlay-body shortcuts-body">
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Archivo</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.file"></h3>
             <dl class="shortcuts-list">
-              <dt>Abrir</dt><dd><kbd>Ctrl</kbd>+<kbd>O</kbd></dd>
-              <dt>Guardar</dt><dd><kbd>Ctrl</kbd>+<kbd>S</kbd></dd>
-              <dt>Guardar como</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dd>
-              <dt>Nuevo documento</dt><dd><kbd>Ctrl</kbd>+<kbd>N</kbd></dd>
-              <dt>Exportar</dt><dd><kbd>Ctrl</kbd>+<kbd>E</kbd></dd>
+              <dt data-i18n="shortcuts.open"></dt><dd><kbd>Ctrl</kbd>+<kbd>O</kbd></dd>
+              <dt data-i18n="shortcuts.save"></dt><dd><kbd>Ctrl</kbd>+<kbd>S</kbd></dd>
+              <dt data-i18n="shortcuts.saveAs"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dd>
+              <dt data-i18n="shortcuts.newDoc"></dt><dd><kbd>Ctrl</kbd>+<kbd>N</kbd></dd>
+              <dt data-i18n="shortcuts.export"></dt><dd><kbd>Ctrl</kbd>+<kbd>E</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Edición y formato</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.editing"></h3>
             <dl class="shortcuts-list">
-              <dt>Negrita</dt><dd><kbd>Ctrl</kbd>+<kbd>B</kbd></dd>
-              <dt>Cursiva</dt><dd><kbd>Ctrl</kbd>+<kbd>I</kbd></dd>
-              <dt>Tachado</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></dd>
-              <dt>Lista</dt><dd><kbd>Ctrl</kbd>+<kbd>U</kbd></dd>
-              <dt>Encabezado (niveles 1 a 4)</dt><dd><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>4</kbd></dd>
-              <dt>Buscar</dt><dd><kbd>Ctrl</kbd>+<kbd>F</kbd></dd>
-              <dt>Buscar y reemplazar</dt><dd><kbd>Ctrl</kbd>+<kbd>H</kbd></dd>
-              <dt>Deshacer</dt><dd><kbd>Ctrl</kbd>+<kbd>Z</kbd></dd>
-              <dt>Rehacer</dt><dd><kbd>Ctrl</kbd>+<kbd>Y</kbd></dd>
+              <dt data-i18n="shortcuts.bold"></dt><dd><kbd>Ctrl</kbd>+<kbd>B</kbd></dd>
+              <dt data-i18n="shortcuts.italic"></dt><dd><kbd>Ctrl</kbd>+<kbd>I</kbd></dd>
+              <dt data-i18n="shortcuts.strikethrough"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></dd>
+              <dt data-i18n="shortcuts.list"></dt><dd><kbd>Ctrl</kbd>+<kbd>U</kbd></dd>
+              <dt data-i18n="shortcuts.heading"></dt><dd><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>4</kbd></dd>
+              <dt data-i18n="shortcuts.find"></dt><dd><kbd>Ctrl</kbd>+<kbd>F</kbd></dd>
+              <dt data-i18n="shortcuts.findReplace"></dt><dd><kbd>Ctrl</kbd>+<kbd>H</kbd></dd>
+              <dt data-i18n="shortcuts.undo"></dt><dd><kbd>Ctrl</kbd>+<kbd>Z</kbd></dd>
+              <dt data-i18n="shortcuts.redo"></dt><dd><kbd>Ctrl</kbd>+<kbd>Y</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Vista</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.view"></h3>
             <dl class="shortcuts-list">
-              <dt>Alternar vista (editor / dividido / solo vista)</dt><dd><kbd>Ctrl</kbd>+<kbd>P</kbd></dd>
-              <dt>Pantalla completa</dt><dd><kbd>F11</kbd></dd>
+              <dt data-i18n="shortcuts.cycleView"></dt><dd><kbd>Ctrl</kbd>+<kbd>P</kbd></dd>
+              <dt data-i18n="shortcuts.fullscreen"></dt><dd><kbd>F11</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Modos de escritura</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.writingModes"></h3>
             <dl class="shortcuts-list">
-              <dt>Enfoque</dt><dd><kbd>Ctrl</kbd>+<kbd>D</kbd></dd>
-              <dt>Hemingway</dt><dd><kbd>Ctrl</kbd>+<kbd>T</kbd></dd>
+              <dt data-i18n="shortcuts.focus"></dt><dd><kbd>Ctrl</kbd>+<kbd>D</kbd></dd>
+              <dt data-i18n="shortcuts.hemingway"></dt><dd><kbd>Ctrl</kbd>+<kbd>T</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Corrector</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.spellcheck"></h3>
             <dl class="shortcuts-list">
-              <dt>Activar o desactivar el corrector</dt><dd><kbd>F7</kbd></dd>
+              <dt data-i18n="shortcuts.toggleSpellcheck"></dt><dd><kbd>F7</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
-            <h3 class="shortcuts-heading">Ayuda</h3>
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.help"></h3>
             <dl class="shortcuts-list">
-              <dt>Atajos de teclado</dt><dd><kbd>Ctrl</kbd>+<kbd>?</kbd></dd>
+              <dt data-i18n="shortcuts.showShortcuts"></dt><dd><kbd>Ctrl</kbd>+<kbd>?</kbd></dd>
             </dl>
           </section>
         </div>
@@ -188,25 +202,22 @@
       <div class="overlay-backdrop"></div>
       <div class="overlay-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title">
         <header class="overlay-header">
-          <h2 id="about-title" class="overlay-title">Acerca de</h2>
-          <button class="overlay-close" id="about-close" type="button" aria-label="Cerrar">
+          <h2 id="about-title" class="overlay-title" data-i18n="about.title"></h2>
+          <button class="overlay-close" id="about-close" type="button" data-i18n-aria-label="common.close">
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
               <path d="M1 1 L13 13 M13 1 L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
             </svg>
           </button>
         </header>
         <div class="overlay-body about-body">
-          <p class="about-name">Apostrophe para Windows</p>
-          <p class="about-version">Versión <span id="about-version-num">—</span></p>
-          <p class="about-desc">Editor de Markdown nativo para Windows. Port de Apostrophe (GNOME).</p>
+          <p class="about-name" data-i18n="about.name"></p>
+          <p class="about-version"><span data-i18n="about.version"></span> <span id="about-version-num">—</span></p>
+          <p class="about-desc" data-i18n="about.description"></p>
           <div class="about-links">
-            <a href="https://github.com/Gerardo-Franco/apostrophe-for-windows" id="about-link-repo" class="about-link" data-external-link>Repositorio</a>
-            <a href="https://gitlab.gnome.org/World/apostrophe" id="about-link-upstream" class="about-link" data-external-link>Proyecto original (GNOME)</a>
+            <a href="https://github.com/GerardoFC8/apostrophe-for-windows" id="about-link-repo" class="about-link" data-external-link data-i18n="about.repo"></a>
+            <a href="https://gitlab.gnome.org/World/apostrophe" id="about-link-upstream" class="about-link" data-external-link data-i18n="about.upstream"></a>
           </div>
-          <p class="about-credits">
-            Distribuido bajo licencia GPL-3.0. Apostrophe es una marca de sus autores originales.
-            Las gracias al equipo de Apostrophe (GNOME) por el editor que inspira este port.
-          </p>
+          <p class="about-credits" data-i18n="about.credits"></p>
         </div>
       </div>
     </div>

@@ -4,10 +4,26 @@ Editor de Markdown nativo para Windows. Port de [Apostrophe](https://gitlab.gnom
 (GNOME) construido con **Tauri 2 + Rust** bajo arquitectura hexagonal
 (ver `docs/adr/0001-frontera-dominio-presentacion.md`).
 
-## Idioma — castellano neutro (OBLIGATORIO)
+## Idioma
 
-Todo en **castellano neutro/nativo**: respuestas del asistente, cadenas de la interfaz
-(diálogos, mensajes, botones), comentarios del código, mensajes de commit y documentación.
+### Interfaz — bilingüe vía catálogo (M15)
+
+La app soporta **español e inglés**. Ninguna cadena visible se escribe en `index.html`
+ni en los módulos: **todas** viven en el catálogo de `src/i18n.ts`.
+
+- HTML estático: `data-i18n` (contenido), `data-i18n-title`, `data-i18n-aria-label`.
+- TypeScript: `t("clave")` y `tp("clave", n)` para plurales.
+- Diálogos nativos: la copia la arma el frontend y viaja por IPC (`ConfirmLabels`).
+  **El backend no guarda copia** — sumar un idioma no debe tocar Rust.
+- La interfaz `Messages` obliga a que todo idioma defina toda la clave: una traducción
+  faltante es un error de compilación, no un hueco en producción.
+
+Al escribir en español dentro del catálogo, sigue las reglas de castellano neutro de abajo.
+
+### Todo lo demás — castellano neutro (OBLIGATORIO)
+
+Respuestas del asistente, comentarios del código, mensajes de commit y documentación en
+**castellano neutro/nativo**.
 
 Reglas:
 

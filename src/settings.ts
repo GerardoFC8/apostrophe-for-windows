@@ -14,14 +14,19 @@
 import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
 
-// Esquema tipado y EXTENSIBLE: este slice solo usa `spellcheck`; el tema (theme) y otras
-// preferencias se sumaran aqui en slices futuros sin tocar a los consumidores.
+// Esquema tipado y EXTENSIBLE: el tema y otras preferencias se sumaran aqui en slices
+// futuros sin tocar a los consumidores.
 export interface Settings {
   spellcheck: boolean;
+  /// Idioma elegido a mano. `null` = seguir al sistema (ver i18n.detectLocale). Se guarda
+  /// la ausencia de eleccion, no el idioma detectado: asi quien nunca toco el selector
+  /// acompaña al sistema si algun dia cambia de idioma.
+  language: "es" | "en" | null;
 }
 
 const DEFAULTS: Settings = {
   spellcheck: true,
+  language: null,
 };
 
 // Carga perezosa y memoizada del unico store: se abre una sola vez y se reusa la misma

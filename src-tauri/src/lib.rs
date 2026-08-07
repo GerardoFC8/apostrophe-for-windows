@@ -287,9 +287,7 @@ fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
 async fn confirm_discard_if_dirty(
     app: &tauri::AppHandle,
     doc: &Doc,
-    title: &str,
-    message: &str,
-    confirm_label: &str,
+    labels: ConfirmLabels,
 ) -> Result<bool, String> {
     // El guard del Mutex se suelta al terminar el statement: NO se cruza el .await.
     let dirty = doc.lock().unwrap().is_dirty();
@@ -297,17 +295,14 @@ async fn confirm_discard_if_dirty(
         return Ok(true);
     }
     let app2 = app.clone();
-    let title = title.to_string();
-    let message = message.to_string();
-    let confirm_label = confirm_label.to_string();
     let discard = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
-            .message(message)
-            .title(title)
+            .message(labels.message)
+            .title(labels.title)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                confirm_label,
-                "Cancelar".into(),
+                labels.confirm,
+                labels.cancel,
             ))
             .blocking_show()
     })
@@ -336,20 +331,26 @@ fn load_path_into_store(path: PathBuf, doc: &Doc) -> Result<OpenedDoc, String> {
     })
 }
 
+/// Textos del dialogo de confirmacion. Los arma el FRONTEND y viajan por IPC: toda la
+/// copia visible vive en el catalogo de `src/i18n.ts` (ADR-0001 — el frontend presenta,
+/// el adaptador solo muestra lo que recibe). Asi sumar un idioma no toca Rust.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ConfirmLabels {
+    pub title: String,
+    pub message: String,
+    pub confirm: String,
+    pub cancel: String,
+}
+
 /// Abre un .md via DIALOGO nativo. Si el documento actual tiene cambios sin guardar,
 /// CONFIRMA antes (anti-perdida, review M4). `async` + dialogos en spawn_blocking.
 #[tauri::command]
 async fn open_document(
     app: tauri::AppHandle,
+    labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(
-        &app,
-        &doc,
-        "¿Abrir otro archivo?",
-        "El documento actual tiene cambios que se perderán.",
-        "Descartar y abrir",
-    )
+    if !confirm_discard_if_dirty(&app, &doc, labels)
     .await?
     {
         return Ok(None); // el usuario cancelo: NO se pierde nada
@@ -388,15 +389,10 @@ async fn open_document(
 async fn open_path(
     app: tauri::AppHandle,
     path: String,
+    labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(
-        &app,
-        &doc,
-        "¿Abrir otro archivo?",
-        "El documento actual tiene cambios que se perderán.",
-        "Descartar y abrir",
-    )
+    if !confirm_discard_if_dirty(&app, &doc, labels)
     .await?
     {
         return Ok(None);
@@ -421,17 +417,12 @@ async fn open_path(
 async fn confirm_close(
     app: tauri::AppHandle,
     text: String,
+    labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<bool, String> {
     doc.lock().unwrap().set_content(text);
-    let proceed = confirm_discard_if_dirty(
-        &app,
-        &doc,
-        "¿Cerrar sin guardar?",
-        "El documento tiene cambios que se perderán.",
-        "Descartar y cerrar",
-    )
+    let proceed = confirm_discard_if_dirty(&app, &doc, labels)
     .await?;
 
     if proceed {
@@ -457,16 +448,11 @@ async fn confirm_close(
 async fn new_document(
     app: tauri::AppHandle,
     text: String,
+    labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<DocStatus>, String> {
     doc.lock().unwrap().set_content(text);
-    if !confirm_discard_if_dirty(
-        &app,
-        &doc,
-        "¿Crear un documento nuevo?",
-        "El documento actual tiene cambios que se perderán.",
-        "Descartar y crear",
-    )
+    if !confirm_discard_if_dirty(&app, &doc, labels)
     .await?
     {
         return Ok(None);

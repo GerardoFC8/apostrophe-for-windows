@@ -247,6 +247,21 @@ body {
   background: var(--hover);
 }
 
+/* M15: separador y encabezado de grupo del menú (usados por el selector de idioma). */
+.menu-sep {
+  height: 1px;
+  margin: 0.3rem 0.1rem;
+  background: var(--border);
+}
+
+.menu-label {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
 /* Hint de tecla del item (alineado a la derecha). */
 .menu-hint {
   margin-left: auto;
