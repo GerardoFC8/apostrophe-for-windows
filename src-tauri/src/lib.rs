@@ -190,6 +190,19 @@ async fn parse_markup(text: String) -> Result<Vec<apostrophe_core::markup::Span>
         .map_err(|e| format!("error al parsear el markup: {e}"))
 }
 
+/// M19: que hay bajo el cursor (enlace, imagen, nota al pie o matematica), para el popover
+/// de vista previa inline. Mismo perfil que `parse_markup`: los regex son de backtracking y
+/// recorren el documento entero, asi que va off-thread para no bloquear el hilo de eventos.
+#[tauri::command]
+async fn inline_target(
+    text: String,
+    offset: usize,
+) -> Result<Option<apostrophe_core::inline::InlineTarget>, String> {
+    tauri::async_runtime::spawn_blocking(move || apostrophe_core::inline::resolve_at(&text, offset))
+        .await
+        .map_err(|e| format!("error al resolver el objetivo inline: {e}"))
+}
+
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
 // state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
@@ -1207,6 +1220,7 @@ pub fn run() {
             toggle_preview_window,
             preview_window_open,
             align_table,
+            inline_target,
             count_stats,
             set_content,
             open_document,

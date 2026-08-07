@@ -46,6 +46,11 @@ export interface Messages {
   "view.preview": string;
   "view.previewFrame": string;
   "view.detach": string;
+  "inline.link": string;
+  "inline.image": string;
+  "inline.footnote": string;
+  "inline.footnoteMissing": string;
+  "inline.math": string;
   "export.action": string;
   "export.hint": string;
   "window.minimize": string;
@@ -153,6 +158,11 @@ const ES: Messages = {
   "view.preview": "Solo vista — Ctrl+P cicla",
   "view.previewFrame": "Vista previa",
   "view.detach": "Vista previa en otra ventana",
+  "inline.link": "Enlace",
+  "inline.image": "Imagen",
+  "inline.footnote": "Nota al pie",
+  "inline.footnoteMissing": "sin definir",
+  "inline.math": "Fórmula",
   "export.action": "Exportar",
   "export.hint": "Exportar a PDF, HTML, ODT, DOCX, EPUB o LaTeX (Ctrl+E)",
   "window.minimize": "Minimizar",
@@ -259,6 +269,11 @@ const EN: Messages = {
   "view.preview": "Preview only — Ctrl+P cycles",
   "view.previewFrame": "Preview",
   "view.detach": "Preview in a separate window",
+  "inline.link": "Link",
+  "inline.image": "Image",
+  "inline.footnote": "Footnote",
+  "inline.footnoteMissing": "not defined",
+  "inline.math": "Formula",
   "export.action": "Export",
   "export.hint": "Export to PDF, HTML, ODT, DOCX, EPUB or LaTeX (Ctrl+E)",
   "window.minimize": "Minimize",

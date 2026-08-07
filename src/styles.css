@@ -248,6 +248,35 @@ body {
   background: var(--hover);
 }
 
+/* M19: popover de vista previa inline. Hereda la paleta del tema; el ancho tiene tope y el
+   valor corta con puntos suspensivos, porque una URL larga no debe estirar el editor. */
+.cm-tooltip:has(.inline-preview) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--editor-fg);
+}
+
+.inline-preview {
+  max-width: 34em;
+  padding: 0.45rem 0.6rem;
+}
+
+.inline-preview-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.inline-preview-value {
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
 /* M17: grilla para elegir el tamaño de la tabla. 5x5 celdas que se resaltan al pasar el
    mouse, como el selector de Word o el TableInput del upstream. */
 .table-picker {

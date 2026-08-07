@@ -130,7 +130,7 @@ static CODE: LazyLock<Regex> = LazyLock::new(|| {
     "#)
 });
 
-static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?x)
     !\[(?P<text>.*?)\]
     \(
@@ -140,7 +140,7 @@ static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
     "#)
 });
 
-static LINK: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static LINK: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?x)
     \[(?P<text>.*?)\]
     \(
@@ -150,7 +150,7 @@ static LINK: LazyLock<Regex> = LazyLock::new(|| {
     "#)
 });
 
-static LINK_ALT: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static LINK_ALT: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?x)
     <(?P<text>(?P<url>((https?|ftp):[^'">\s]+)))>
     "#)
@@ -232,7 +232,7 @@ static CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
 // TABLE no es verbose en el upstream (solo DOTALL): el patron es compacto.
 static TABLE: LazyLock<Regex> = LazyLock::new(|| re(r"(?s)^[\-+]{5,}\n(?P<text>.+?)\n[\-+]{5,}\n"));
 
-static MATH: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static MATH: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?xms)
     (?P<delim>[$]{1,2})
     (?P<text>
@@ -243,14 +243,14 @@ static MATH: LazyLock<Regex> = LazyLock::new(|| {
     "#)
 });
 
-static FOOTNOTE_ID: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static FOOTNOTE_ID: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?x)
     (?P<text>[^\s]+)
     \[\^(?P<id>[^\s]+)\]
     "#)
 });
 
-static FOOTNOTE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static FOOTNOTE: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?xm)
     [ ]{0,3}
     \[\^(?P<id>[^\s]+)\]:

@@ -19,6 +19,7 @@ import { search, searchKeymap, openSearchPanel } from "@codemirror/search";
 import { spellcheckExtension, requestSpellCheck, clearSpellSpans } from "./spellcheck";
 import { focusCompartment, enableFocusDim, disableFocusDim } from "./focus-mode";
 import { markupExtension, requestMarkupHighlight } from "./markup-highlight";
+import { inlinePreviewExtension } from "./inline-preview";
 import { getSetting, setSetting } from "./settings";
 import {
   LOCALES,
@@ -1339,6 +1340,15 @@ const view = new EditorView({
     // M10: resaltado de Markdown (spans del nucleo Rust). Va tras el spellcheck; sus marks
     // pueden solaparse con las ondulitas y con el atenuado de focus sin conflicto.
     markupExtension,
+    // M19: popover de vista previa inline. Las etiquetas se resuelven en CADA popover (no
+    // una vez al construir) para que sigan al idioma activo sin recrear el editor.
+    inlinePreviewExtension(() => ({
+      link: t("inline.link"),
+      image: t("inline.image"),
+      footnote: t("inline.footnote"),
+      footnoteMissing: t("inline.footnoteMissing"),
+      math: t("inline.math"),
+    })),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleUpdate();
     }),

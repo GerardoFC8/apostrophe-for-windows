@@ -14,6 +14,7 @@
 pub mod convert;
 pub mod document;
 pub mod encoding;
+pub mod inline;
 pub mod markup;
 pub mod recents;
 pub mod snapshot;
