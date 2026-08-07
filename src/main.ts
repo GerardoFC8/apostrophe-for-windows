@@ -275,6 +275,103 @@ const labelsFor = (kind: "open" | "close" | "new") => ({
   cancel: t("confirm.cancel"),
 });
 
+// --- M17: tablas ---
+
+const TABLE_PICKER_SIZE = 5; // 5x5 alcanza para casi todo; mas grande se edita a mano
+
+const tableGrid = document.querySelector<HTMLElement>("#table-grid")!;
+const tableSize = document.querySelector<HTMLElement>("#table-size")!;
+
+// Grilla de selección: al pasar el mouse se resaltan las celdas de arriba-izquierda hasta
+// la actual y la etiqueta muestra el tamaño. Mismo gesto que el selector del upstream.
+function buildTablePicker(): void {
+  const cells: string[] = [];
+  for (let row = 1; row <= TABLE_PICKER_SIZE; row++) {
+    for (let col = 1; col <= TABLE_PICKER_SIZE; col++) {
+      cells.push(
+        `<button class="table-cell" type="button" data-row="${row}" data-col="${col}" data-on="false" aria-label="${row} × ${col}"></button>`
+      );
+    }
+  }
+  tableGrid.innerHTML = cells.join("");
+
+  const paint = (row: number, col: number) => {
+    tableGrid.querySelectorAll<HTMLElement>(".table-cell").forEach((cell) => {
+      const on = Number(cell.dataset.row) <= row && Number(cell.dataset.col) <= col;
+      cell.dataset.on = String(on);
+    });
+    tableSize.textContent = `${row} × ${col}`;
+  };
+
+  tableGrid.querySelectorAll<HTMLButtonElement>(".table-cell").forEach((cell) => {
+    const row = Number(cell.dataset.row);
+    const col = Number(cell.dataset.col);
+    cell.addEventListener("mouseenter", () => paint(row, col));
+    cell.addEventListener("click", () => {
+      closeAppMenu();
+      void insertTable(row, col);
+    });
+  });
+  // Al salir de la grilla se apaga todo: si no, queda un resaltado fantasma al reabrir.
+  tableGrid.addEventListener("mouseleave", () => {
+    tableGrid.querySelectorAll<HTMLElement>(".table-cell").forEach((c) => (c.dataset.on = "false"));
+    tableSize.innerHTML = "&nbsp;";
+  });
+}
+
+// `rows` son filas de CUERPO: la grilla cuenta la primera fila como el encabezado, que en
+// Markdown siempre existe. Elegir 3x2 da encabezado + 2 filas.
+async function insertTable(rows: number, cols: number): Promise<void> {
+  try {
+    const table = await invoke<string>("make_table", { rows: rows - 1, cols });
+    const sel = view.state.selection.main;
+    const line = view.state.doc.lineAt(sel.from);
+    // Una tabla es un bloque: si el cursor está a mitad de un renglón con texto, se abre
+    // uno nuevo en vez de partirlo por la mitad.
+    const prefix = line.text.slice(0, sel.from - line.from).trim() === "" ? "" : "\n\n";
+    const insert = `${prefix}${table}`;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert },
+      // El cursor queda en la primera celda del encabezado, listo para escribir.
+      selection: { anchor: sel.from + prefix.length + 2 },
+      scrollIntoView: true,
+    });
+    view.focus();
+  } catch (err) {
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+  }
+}
+
+// Realinea la tabla sobre la que está el cursor. El bloque se delimita por renglones en
+// blanco; el dominio decide si eso es o no una tabla y devuelve null cuando no lo es, así
+// que nunca se reescribe algo que no entendimos.
+async function alignTableAtCursor(): Promise<boolean> {
+  const doc = view.state.doc;
+  const cursor = doc.lineAt(view.state.selection.main.from);
+  let first = cursor.number;
+  let last = cursor.number;
+  while (first > 1 && doc.line(first - 1).text.trim() !== "") first--;
+  while (last < doc.lines && doc.line(last + 1).text.trim() !== "") last++;
+
+  const from = doc.line(first).from;
+  const to = doc.line(last).to;
+  const block = doc.sliceString(from, to);
+  try {
+    const aligned = await invoke<string | null>("align_table", { text: block });
+    if (!aligned) {
+      flashStatus(t("status.notATable"));
+      return true;
+    }
+    if (aligned !== block) {
+      view.dispatch({ changes: { from, to, insert: aligned } });
+      flashStatus(t("status.tableAligned"));
+    }
+  } catch (err) {
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+  }
+  return true;
+}
+
 // --- M16: documentos recientes ---
 
 interface RecentEntry {
@@ -374,6 +471,7 @@ async function applyLocale(locale: Locale, persist: boolean): Promise<void> {
   setLocale(locale);
   applyTranslations();
   buildThemeMenu();
+buildTablePicker();
   buildLanguageMenu();
   // El tema activo ya vive en el dataset de <html>: reaplicarlo actualiza la etiqueta del
   // trigger y el check del item, que acaban de reconstruirse con el catalogo nuevo.
@@ -1116,6 +1214,8 @@ const formatKeymap = keymap.of([
   { key: "Mod-i", run: (v) => toggleInlineFormat(v, "_"), preventDefault: true },
   // Tachado: Ctrl+Shift+D — marcador ~~ (upstream: <Shift><Primary>D)
   { key: "Mod-Shift-d", run: (v) => toggleInlineFormat(v, "~~"), preventDefault: true },
+  // M17: realinear la tabla bajo el cursor — Ctrl+Shift+T (Ctrl+T ya es Hemingway).
+  { key: "Mod-Shift-t", run: () => { void alignTableAtCursor(); return true; }, preventDefault: true },
   // Lista desordenada: Ctrl+U — prefijo "- " (upstream: <Primary>u)
   { key: "Mod-u", run: toggleList, preventDefault: true },
   // Encabezados Ctrl+1..Ctrl+4 (upstream: "<Primary>1 4" = cicla niveles 1-4)

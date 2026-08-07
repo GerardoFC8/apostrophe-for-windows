@@ -45,6 +45,15 @@
           <button class="menu-item" id="menu-about" type="button" role="menuitem" aria-haspopup="dialog">
             <span data-i18n="menu.about"></span>
           </button>
+          <!-- M17: selector de tamaño de tabla. Grilla de 5x5 que se resalta al pasar el
+               mouse (paridad con TableInput.ui del upstream); la etiqueta muestra "N x M"
+               en vivo. Las celdas las construye main.ts. -->
+          <div class="menu-sep" role="separator"></div>
+          <div class="menu-label" data-i18n="menu.table"></div>
+          <div class="table-picker">
+            <div id="table-grid" class="table-grid" role="group"></div>
+            <div id="table-size" class="table-size">&nbsp;</div>
+          </div>
           <!-- M15: selector de idioma. Los items los construye main.ts (buildLanguageMenu)
                reusando .theme-item, que ya trae el check del activo. Los nombres de idioma
                NO se traducen: cada uno va en su propio idioma, para que quien no entienda
@@ -166,6 +175,7 @@
               <dt data-i18n="shortcuts.italic"></dt><dd><kbd>Ctrl</kbd>+<kbd>I</kbd></dd>
               <dt data-i18n="shortcuts.strikethrough"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></dd>
               <dt data-i18n="shortcuts.list"></dt><dd><kbd>Ctrl</kbd>+<kbd>U</kbd></dd>
+              <dt data-i18n="shortcuts.alignTable"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></dd>
               <dt data-i18n="shortcuts.heading"></dt><dd><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>4</kbd></dd>
               <dt data-i18n="shortcuts.find"></dt><dd><kbd>Ctrl</kbd>+<kbd>F</kbd></dd>
               <dt data-i18n="shortcuts.findReplace"></dt><dd><kbd>Ctrl</kbd>+<kbd>H</kbd></dd>

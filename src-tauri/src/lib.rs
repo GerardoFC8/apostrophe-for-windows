@@ -125,6 +125,21 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
     apostrophe_core::stats::count(&text)
 }
 
+/// M17: tabla pipe vacia de `rows` x `cols`. Puro y barato: cruza la frontera igual que
+/// `count_stats` para que la logica viva en un solo lado (ADR-0001). El dominio recorta
+/// las dimensiones, asi que un valor absurdo no puede generar un documento gigante.
+#[tauri::command]
+fn make_table(rows: usize, cols: usize) -> String {
+    apostrophe_core::table::empty_table(rows, cols)
+}
+
+/// M17: realinea las barras de una tabla pipe. Devuelve `None` si el texto NO es una tabla
+/// reconocible — el frontend entonces no toca nada, que es mejor que estropear el documento.
+#[tauri::command]
+fn align_table(text: String) -> Option<String> {
+    apostrophe_core::table::align_table(&text)
+}
+
 /// M10: parser de resaltado de Markdown (ADR-0001 D1). CPU-bound (regex con backtracking
 /// sobre el documento completo) -> `spawn_blocking` para no bloquear el hilo de eventos,
 /// igual que `spellcheck`. Sin estado ni `focus_mode`: el highlight sigue activo en modo
@@ -1149,6 +1164,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             preview_markdown,
             recent_files,
+            make_table,
+            align_table,
             count_stats,
             set_content,
             open_document,

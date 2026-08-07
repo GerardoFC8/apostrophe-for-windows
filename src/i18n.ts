@@ -33,6 +33,9 @@ export interface Messages {
   "menu.about": string;
   "menu.language": string;
   "menu.recents": string;
+  "menu.table": string;
+  "status.tableAligned": string;
+  "status.notATable": string;
   "theme.open": string;
   "theme.light": string;
   "theme.dark": string;
@@ -107,6 +110,7 @@ export interface Messages {
   "shortcuts.italic": string;
   "shortcuts.strikethrough": string;
   "shortcuts.list": string;
+  "shortcuts.alignTable": string;
   "shortcuts.heading": string;
   "shortcuts.find": string;
   "shortcuts.findReplace": string;
@@ -137,6 +141,7 @@ const ES: Messages = {
   "menu.about": "Acerca de",
   "menu.language": "Idioma",
   "menu.recents": "Recientes",
+  "menu.table": "Insertar tabla",
   "theme.open": "Tema",
   "theme.light": "Claro",
   "theme.dark": "Oscuro",
@@ -176,6 +181,8 @@ const ES: Messages = {
   "status.dirtyCheckFailed":
     "no se pudo verificar los cambios — guarda con Ctrl+S antes de cerrar",
   "status.previewFailed": "error de preview",
+  "status.tableAligned": "tabla alineada",
+  "status.notATable": "el cursor no está sobre una tabla",
   "error.open": "error al abrir",
   "error.save": "error al guardar",
   "error.export": "error al exportar",
@@ -207,6 +214,7 @@ const ES: Messages = {
   "shortcuts.italic": "Cursiva",
   "shortcuts.strikethrough": "Tachado",
   "shortcuts.list": "Lista",
+  "shortcuts.alignTable": "Alinear la tabla bajo el cursor",
   "shortcuts.heading": "Encabezado (niveles 1 a 4)",
   "shortcuts.find": "Buscar",
   "shortcuts.findReplace": "Buscar y reemplazar",
@@ -238,6 +246,7 @@ const EN: Messages = {
   "menu.about": "About",
   "menu.language": "Language",
   "menu.recents": "Recent",
+  "menu.table": "Insert table",
   "theme.open": "Theme",
   "theme.light": "Light",
   "theme.dark": "Dark",
@@ -277,6 +286,8 @@ const EN: Messages = {
   "status.dirtyCheckFailed":
     "could not check for changes — save with Ctrl+S before closing",
   "status.previewFailed": "preview error",
+  "status.tableAligned": "table aligned",
+  "status.notATable": "the cursor is not on a table",
   "error.open": "error opening the file",
   "error.save": "error saving",
   "error.export": "error exporting",
@@ -308,6 +319,7 @@ const EN: Messages = {
   "shortcuts.italic": "Italic",
   "shortcuts.strikethrough": "Strikethrough",
   "shortcuts.list": "List",
+  "shortcuts.alignTable": "Align the table under the cursor",
   "shortcuts.heading": "Heading (levels 1 to 4)",
   "shortcuts.find": "Find",
   "shortcuts.findReplace": "Find and replace",

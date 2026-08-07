@@ -19,4 +19,5 @@ pub mod recents;
 pub mod snapshot;
 pub mod spellcheck;
 pub mod stats;
+pub mod table;
 pub mod watcher;

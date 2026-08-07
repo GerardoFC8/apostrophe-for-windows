@@ -248,6 +248,40 @@ body {
   background: var(--hover);
 }
 
+/* M17: grilla para elegir el tamaño de la tabla. 5x5 celdas que se resaltan al pasar el
+   mouse, como el selector de Word o el TableInput del upstream. */
+.table-picker {
+  padding: 0.25rem 0.5rem 0.4rem;
+}
+
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  width: max-content;
+}
+
+.table-cell {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  cursor: default;
+}
+
+.table-cell[data-on="true"] {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+
+.table-size {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
 /* M16: un nombre de archivo largo no debe estirar el popover. Se recorta con puntos
    suspensivos; la ruta completa sigue disponible en el title del botón. */
 .recent-name {
