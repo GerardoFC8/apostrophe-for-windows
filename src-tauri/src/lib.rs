@@ -615,8 +615,12 @@ async fn save_document_as(
 /// del archivo resultante. En Windows el dialogo agrega la extension del filtro elegido,
 /// asi que elegir "Documento de Word" produce `.docx` y de ahi sale el formato.
 #[tauri::command]
-async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<String>, String> {
-    use apostrophe_core::convert::{export_args, ExportFormat};
+async fn export_document(
+    app: tauri::AppHandle,
+    text: String,
+    css: String,
+) -> Result<Option<String>, String> {
+    use apostrophe_core::convert::{export_args, ExportFormat, ExportOptions};
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -679,11 +683,35 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
     std::fs::write(&tmp, text.as_bytes())
         .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
 
+    // La hoja de estilos del preview (un `<style>` que arma el frontend) va a otro
+    // temporal: pandoc solo la acepta como ARCHIVO via --include-in-header. Solo se
+    // genera para HTML — es el unico formato que entiende CSS.
+    let header = if format == ExportFormat::Html && !css.is_empty() {
+        let path = std::env::temp_dir().join(format!(
+            "apostrophe-export-{}-{}.head.html",
+            std::process::id(),
+            seq
+        ));
+        std::fs::write(&path, css.as_bytes())
+            .map_err(|e| format!("no se pudo escribir la hoja de estilos: {e}"))?;
+        Some(path)
+    } else {
+        None
+    };
+    let header_str = header.as_ref().map(|p| p.to_string_lossy().into_owned());
+
+    let opts = ExportOptions {
+        pdf_engine: pdf_engine.as_deref(),
+        header_include: header_str.as_deref(),
+    };
     let mut args = vec![tmp.to_string_lossy().into_owned()];
-    args.extend(export_args(format, &out_str, pdf_engine.as_deref()));
+    args.extend(export_args(format, &out_str, &opts));
 
     let result = run_pandoc_sidecar(&app, args).await;
     let _ = std::fs::remove_file(&tmp);
+    if let Some(path) = header {
+        let _ = std::fs::remove_file(path);
+    }
     result.map(|_| Some(out_str)) // pandoc escribe en --output; su stdout queda vacio
 }
 

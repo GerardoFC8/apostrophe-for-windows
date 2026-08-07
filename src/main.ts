@@ -171,9 +171,10 @@ function getInitialTheme(): Theme {
 }
 
 // CSS del preview derivado de las CSS vars del tema activo (una sola fuente de verdad).
-function previewStyle(): string {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (name: string) => cs.getPropertyValue(name).trim();
+// Reglas del markdown renderizado, parametrizadas por la paleta. Las comparten el
+// preview (tema activo) y la exportacion (siempre claro): mismas reglas, distinta
+// paleta. Es lo que garantiza que el HTML exportado se vea como el preview.
+function markdownStylesheet(v: (name: string) => string): string {
   return `<style>
     html,body{background:${v("--preview-bg")};color:${v("--preview-fg")};}
     body{font-family:"Inter Variable",system-ui,sans-serif;line-height:1.6;max-width:46em;margin:0 auto;padding:1.6rem 2rem;}
@@ -186,6 +187,26 @@ function previewStyle(): string {
     h1,h2,h3{line-height:1.25;}
     img{max-width:100%;}
   </style>`;
+}
+
+function previewStyle(): string {
+  const cs = getComputedStyle(document.documentElement);
+  return markdownStylesheet((name) => cs.getPropertyValue(name).trim());
+}
+
+// Hoja de estilos para EXPORTAR: siempre con la paleta CLARA, sin importar el tema
+// activo. Un HTML o un PDF de fondo oscuro es incomodo de leer y de imprimir, y quien
+// lo recibe no eligio tu tema. Se lee de un elemento sonda con data-theme="light"
+// porque las vars del tema activo estan en <html> y se heredan a todo el arbol.
+function exportStyle(): string {
+  const probe = document.createElement("div");
+  probe.dataset.theme = "light";
+  probe.hidden = true;
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const css = markdownStylesheet((name) => cs.getPropertyValue(name).trim());
+  probe.remove();
+  return css;
 }
 
 // Inyecta el <style> del tema en el HTML standalone de pandoc (inline -> anda en el
@@ -580,7 +601,10 @@ async function saveDocAs(): Promise<void> {
 async function exportDoc(): Promise<void> {
   status.textContent = "exportando…"; // en-progreso (sin auto-limpiar hasta terminar)
   try {
-    const out = await invoke<string | null>("export_document", { text: getText() });
+    const out = await invoke<string | null>("export_document", {
+      text: getText(),
+      css: exportStyle(),
+    });
     if (out) flashStatus("exportado");
     else status.textContent = ""; // cancelado
   } catch (err) {

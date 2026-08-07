@@ -2,7 +2,11 @@
    define el set completo de CSS vars; el editor (CM6), el chrome y el preview las
    consumen, asi cambiar de tema re-estiliza TODO en vivo sin reconfigurar nada.
    Paleta inspirada en Adwaita (GNOME). */
-:root {
+/* El tema claro es el default de :root. Tambien se declara bajo [data-theme="light"]
+   para poder leer su paleta con getComputedStyle desde un elemento sonda, aunque el
+   tema activo sea otro: la exportacion SIEMPRE sale en claro (main.ts -> exportStyle). */
+:root,
+[data-theme="light"] {
   color-scheme: light;
   --accent: #3584e4;
   --bg: #ffffff;

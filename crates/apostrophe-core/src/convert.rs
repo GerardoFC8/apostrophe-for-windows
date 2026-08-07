@@ -150,10 +150,20 @@ impl ExportFormat {
     /// - PDF ademas: `--pdf-engine=<ruta>` con la ruta ABSOLUTA del sidecar typst. No
     ///   alcanza con `--pdf-engine=typst`: pandoc buscaria `typst` en el PATH y el
     ///   sidecar vive junto al ejecutable de la app, que no esta en el PATH.
-    fn format_args(self, pdf_engine: Option<&str>) -> Vec<String> {
+    /// - HTML ademas: `--include-in-header=<ruta>` con la hoja de estilos del preview.
+    ///   Se usa `--include-in-header` y NO `--css` (lo que hace upstream) porque `--css`
+    ///   agrega un `<link>` a un archivo externo: el HTML dejaria de ser portable. Este
+    ///   flag inyecta el `<style>` INLINE y el archivo se puede compartir suelto.
+    fn format_args(self, opts: &ExportOptions) -> Vec<String> {
         let owned = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         match self {
-            ExportFormat::Html => owned(&["--standalone", "--mathjax"]),
+            ExportFormat::Html => {
+                let mut args = owned(&["--standalone", "--mathjax"]);
+                if let Some(header) = opts.header_include {
+                    args.push(format!("--include-in-header={header}"));
+                }
+                args
+            }
             ExportFormat::Latex | ExportFormat::Epub => owned(&["--standalone"]),
             ExportFormat::Odt | ExportFormat::Docx => owned(&["--variable=papersize:a4"]),
             ExportFormat::Pdf => {
@@ -161,7 +171,7 @@ impl ExportFormat {
                 // Si falta la ruta se omite el flag: pandoc caera de vuelta al PATH y
                 // fallara con "typst not found". El adaptador resuelve la ruta antes de
                 // llegar aca, asi que en la app esta rama no deberia darse.
-                if let Some(engine) = pdf_engine {
+                if let Some(engine) = opts.pdf_engine {
                     args.push(format!("--pdf-engine={engine}"));
                 }
                 args.push("--variable=papersize:a4".to_string());
@@ -171,24 +181,28 @@ impl ExportFormat {
     }
 }
 
+/// Entradas OPCIONALES del export que dependen del entorno (rutas que solo el adaptador
+/// conoce). Cada una la consume un unico formato; el resto las ignora.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExportOptions<'a> {
+    /// Ruta absoluta al sidecar typst. Solo la usa `Pdf`.
+    pub pdf_engine: Option<&'a str>,
+    /// Ruta a un fragmento HTML (un `<style>`) que se inyecta en el `<head>`.
+    /// Solo la usa `Html`. Es como viaja la hoja de estilos del preview al archivo.
+    pub header_include: Option<&'a str>,
+}
+
 /// Construye los args de pandoc para EXPORTAR a `output_path` en `format`:
 /// `--from markdown --to <fmt> <flags del formato> --output <path>`. El input
 /// (la ruta del temporal con el markdown) lo antepone el adaptador, igual que el preview.
-///
-/// `pdf_engine` es la ruta absoluta al sidecar typst. Solo se usa cuando `format` es
-/// `Pdf`; para el resto se ignora (pasar `None` es lo normal).
-pub fn export_args(
-    format: ExportFormat,
-    output_path: &str,
-    pdf_engine: Option<&str>,
-) -> Vec<String> {
+pub fn export_args(format: ExportFormat, output_path: &str, opts: &ExportOptions) -> Vec<String> {
     let mut args = vec![
         "--from".to_string(),
         "markdown".to_string(),
         "--to".to_string(),
         format.pandoc_to().to_string(),
     ];
-    args.extend(format.format_args(pdf_engine));
+    args.extend(format.format_args(opts));
     args.push("--output".to_string());
     args.push(output_path.to_string());
     args
@@ -244,7 +258,7 @@ mod tests {
 
     #[test]
     fn export_args_html_tiene_output_y_standalone() {
-        let args = export_args(ExportFormat::Html, "/tmp/out.html", None);
+        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
         assert_eq!(
             args,
             [
@@ -267,7 +281,7 @@ mod tests {
         // ODT/DOCX son binarios armados con la plantilla interna de pandoc: --standalone
         // no aplica, y --mathjax tampoco (no hay HTML donde cargar el script).
         assert_eq!(
-            export_args(ExportFormat::Odt, "/tmp/out.odt", None),
+            export_args(ExportFormat::Odt, "/tmp/out.odt", &ExportOptions::default()),
             [
                 "--from",
                 "markdown",
@@ -283,7 +297,7 @@ mod tests {
     #[test]
     fn export_args_docx_usa_papersize_y_no_standalone() {
         assert_eq!(
-            export_args(ExportFormat::Docx, "/tmp/out.docx", None),
+            export_args(ExportFormat::Docx, "/tmp/out.docx", &ExportOptions::default()),
             [
                 "--from",
                 "markdown",
@@ -299,11 +313,11 @@ mod tests {
     #[test]
     fn export_args_latex_y_epub_son_standalone_sin_mathjax() {
         assert_eq!(
-            export_args(ExportFormat::Latex, "/tmp/out.tex", None),
+            export_args(ExportFormat::Latex, "/tmp/out.tex", &ExportOptions::default()),
             ["--from", "markdown", "--to", "latex", "--standalone", "--output", "/tmp/out.tex"]
         );
         assert_eq!(
-            export_args(ExportFormat::Epub, "/tmp/out.epub", None),
+            export_args(ExportFormat::Epub, "/tmp/out.epub", &ExportOptions::default()),
             ["--from", "markdown", "--to", "epub", "--standalone", "--output", "/tmp/out.epub"]
         );
     }
@@ -312,7 +326,7 @@ mod tests {
     fn html_nunca_incrusta_recursos() {
         // Regresion: --embed-resources junto a --mathjax hace que pandoc busque MathJax
         // en una ruta local del sistema y la exportacion falle en Windows. Ver format_args.
-        let args = export_args(ExportFormat::Html, "/tmp/out.html", None);
+        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
         assert!(!args.iter().any(|a| a.contains("embed-resources")));
     }
 
@@ -344,7 +358,7 @@ mod tests {
         // `--pdf-engine=typst` a secas NO sirve: pandoc lo buscaria en el PATH y el
         // sidecar vive junto al ejecutable de la app. Tiene que ir la ruta completa.
         assert_eq!(
-            export_args(ExportFormat::Pdf, "/tmp/out.pdf", Some("/opt/app/typst")),
+            export_args(ExportFormat::Pdf, "/tmp/out.pdf", &ExportOptions { pdf_engine: Some("/opt/app/typst"), ..Default::default() }),
             [
                 "--from",
                 "markdown",
@@ -365,14 +379,17 @@ mod tests {
         let args = export_args(
             ExportFormat::Pdf,
             "/tmp/out.pdf",
-            Some(r"C:\PROYECTOS DEMO\typst.exe"),
+            &ExportOptions {
+                pdf_engine: Some(r"C:\PROYECTOS DEMO\typst.exe"),
+                ..Default::default()
+            },
         );
         assert!(args.contains(&r"--pdf-engine=C:\PROYECTOS DEMO\typst.exe".to_string()));
     }
 
     #[test]
     fn export_args_pdf_sin_motor_omite_el_flag() {
-        let args = export_args(ExportFormat::Pdf, "/tmp/out.pdf", None);
+        let args = export_args(ExportFormat::Pdf, "/tmp/out.pdf", &ExportOptions::default());
         assert!(!args.iter().any(|a| a.starts_with("--pdf-engine")));
         assert!(args.contains(&"--variable=papersize:a4".to_string()));
     }
@@ -381,7 +398,14 @@ mod tests {
     fn el_motor_pdf_no_contamina_otros_formatos() {
         // Pasar la ruta con un formato que no es PDF no debe agregar el flag.
         for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
-            let args = export_args(format, "/tmp/out", Some("/opt/app/typst"));
+            let args = export_args(
+                format,
+                "/tmp/out",
+                &ExportOptions {
+                    pdf_engine: Some("/opt/app/typst"),
+                    ..Default::default()
+                },
+            );
             assert!(
                 !args.iter().any(|a| a.starts_with("--pdf-engine")),
                 "{format:?} no deberia recibir --pdf-engine"
@@ -396,6 +420,74 @@ mod tests {
                 format.needs_pdf_engine(),
                 format == ExportFormat::Pdf,
                 "{format:?}"
+            );
+        }
+    }
+
+    // --- M14: la hoja de estilos del preview viaja al HTML exportado ---
+
+    #[test]
+    fn html_inyecta_la_hoja_de_estilos_en_el_head() {
+        let args = export_args(
+            ExportFormat::Html,
+            "/tmp/out.html",
+            &ExportOptions {
+                header_include: Some("/tmp/estilo.html"),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            args,
+            [
+                "--from",
+                "markdown",
+                "--to",
+                "html5",
+                "--standalone",
+                "--mathjax",
+                "--include-in-header=/tmp/estilo.html",
+                "--output",
+                "/tmp/out.html"
+            ]
+        );
+    }
+
+    #[test]
+    fn html_nunca_enlaza_una_hoja_externa() {
+        // Regresion: `--css` (lo que usa upstream) agrega un <link> a un archivo suelto y
+        // el HTML deja de ser portable. Tiene que ir inline via --include-in-header.
+        let args = export_args(
+            ExportFormat::Html,
+            "/tmp/out.html",
+            &ExportOptions {
+                header_include: Some("/tmp/estilo.html"),
+                ..Default::default()
+            },
+        );
+        assert!(!args.iter().any(|a| a.starts_with("--css")));
+    }
+
+    #[test]
+    fn html_sin_hoja_de_estilos_omite_el_flag() {
+        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
+        assert!(!args.iter().any(|a| a.starts_with("--include-in-header")));
+    }
+
+    #[test]
+    fn la_hoja_de_estilos_no_contamina_otros_formatos() {
+        // Solo HTML entiende un <style>: inyectarlo en un DOCX o un PDF no tiene sentido.
+        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Html) {
+            let args = export_args(
+                format,
+                "/tmp/out",
+                &ExportOptions {
+                    header_include: Some("/tmp/estilo.html"),
+                    ..Default::default()
+                },
+            );
+            assert!(
+                !args.iter().any(|a| a.starts_with("--include-in-header")),
+                "{format:?} no deberia recibir --include-in-header"
             );
         }
     }
