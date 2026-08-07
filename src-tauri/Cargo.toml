@@ -1,6 +1,6 @@
 [package]
 name = "apostrophe"
-version = "0.2.0"
+version = "0.3.0"
 description = "Clon nativo de Apostrophe para Windows (Tauri + Rust)"
 authors = ["Gerardo Franco"]
 edition = "2021"
