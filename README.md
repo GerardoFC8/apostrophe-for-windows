@@ -1,3 +1,5 @@
+**Español** | [English](./README.en.md)
+
 # Apostrophe para Windows
 
 Editor de Markdown nativo, minimalista y libre de distracciones para Windows.
@@ -50,18 +52,19 @@ pnpm tauri dev
 > ⚠️ El instalador **MSI debe construirse en Windows** (WiX solo corre en Windows).
 > El instalador NSIS (`setup.exe`) también se genera en el mismo paso.
 
-1. Asegurate de haber corrido los scripts de provisioning (pandoc + diccionarios).
-2. Compilá el bundle de release:
+1. Asegúrate de haber corrido los scripts de provisioning (pandoc, typst y diccionarios).
+2. Compila el bundle de release:
 
    ```powershell
    pnpm tauri build
    ```
 
-3. Los instaladores quedan en:
+3. Los instaladores quedan en (el workspace tiene el `target` en la raíz, no en
+   `src-tauri/`):
 
    ```
-   src-tauri/target/release/bundle/nsis/Apostrophe_<versión>_x64-setup.exe   # NSIS
-   src-tauri/target/release/bundle/msi/Apostrophe_<versión>_x64_en-US.msi     # MSI (WiX)
+   target/release/bundle/nsis/Apostrophe_<versión>_x64-setup.exe   # NSIS
+   target/release/bundle/msi/Apostrophe_<versión>_x64_en-US.msi     # MSI (WiX)
    ```
 
 ### Configuración del instalador
