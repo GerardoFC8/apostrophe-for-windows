@@ -140,6 +140,45 @@ fn align_table(text: String) -> Option<String> {
     apostrophe_core::table::align_table(&text)
 }
 
+// --- M18: ventana de vista previa desacoplada ---
+// Paridad con `preview_window.py` del upstream. La ventana la crea RUST y no el frontend:
+// asi la superficie de la API que el JS puede tocar no crece (crear ventanas desde el
+// webview exigiria abrirle el permiso `core:webview:allow-create-webview-window`).
+//
+// La ventana es tonta: solo muestra el HTML que le emite la principal. Ver preview.html.
+
+/// Etiqueta de la ventana; tiene que coincidir con la lista `windows` de la capability.
+const PREVIEW_WINDOW: &str = "preview";
+
+/// Abre la ventana de vista previa, o la cierra si ya estaba abierta. Devuelve `true` si
+/// quedo ABIERTA, para que el frontend refleje el estado en el boton.
+#[tauri::command]
+async fn toggle_preview_window(app: tauri::AppHandle) -> Result<bool, String> {
+    if let Some(existing) = app.get_webview_window(PREVIEW_WINDOW) {
+        existing
+            .close()
+            .map_err(|e| format!("no se pudo cerrar la ventana de vista previa: {e}"))?;
+        return Ok(false);
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        PREVIEW_WINDOW,
+        tauri::WebviewUrl::App("preview.html".into()),
+    )
+    .title("Apostrophe")
+    .inner_size(700.0, 800.0)
+    .build()
+    .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?;
+    Ok(true)
+}
+
+/// `true` si la ventana de vista previa esta abierta. El frontend lo consulta al arrancar
+/// para dejar el boton en el estado correcto.
+#[tauri::command]
+fn preview_window_open(app: tauri::AppHandle) -> bool {
+    app.get_webview_window(PREVIEW_WINDOW).is_some()
+}
+
 /// M10: parser de resaltado de Markdown (ADR-0001 D1). CPU-bound (regex con backtracking
 /// sobre el documento completo) -> `spawn_blocking` para no bloquear el hilo de eventos,
 /// igual que `spellcheck`. Sin estado ni `focus_mode`: el highlight sigue activo en modo
@@ -1165,6 +1204,8 @@ pub fn run() {
             preview_markdown,
             recent_files,
             make_table,
+            toggle_preview_window,
+            preview_window_open,
             align_table,
             count_stats,
             set_content,

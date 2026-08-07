@@ -10,6 +10,17 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
+  // M18: dos puntos de entrada. `preview.html` es la ventana de vista previa desacoplada;
+  // se mantiene aparte de index.html para que NO arrastre el bundle del editor (CodeMirror,
+  // fuentes, spellcheck) — solo necesita un iframe y un listener.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        preview: "preview.html",
+      },
+    },
+  },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,

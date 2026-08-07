@@ -95,6 +95,15 @@
             <circle cx="8" cy="8" r="2" />
           </svg>
         </button>
+        <!-- M18: abre/cierra la vista previa en su propia ventana. Va con el control de
+             vista porque es una forma más de ver el documento, no una acción sobre él.
+             aria-pressed refleja si la ventana está abierta. -->
+        <button class="bar-btn view-btn" id="preview-window-btn" type="button" data-i18n-title="view.detach" aria-pressed="false">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="1.5" y="3.5" width="9" height="9" rx="1.5" />
+            <path d="M9 3.5 V2 h5.5 v5.5 H13" />
+          </svg>
+        </button>
       </div>
       <button class="bar-btn" id="export-btn" type="button" data-i18n-title="export.hint" data-i18n="export.action"></button>
       <div class="window-controls">

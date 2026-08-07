@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Apostrophe</title>
+    <script type="module" src="/src/preview-window.ts" defer></script>
+    <style>
+      /* Página mínima a propósito: NO importa styles.css. El HTML renderizado trae su
+         propia hoja de estilos inyectada por la ventana principal, igual que el preview
+         embebido. Aquí solo se necesita que el iframe ocupe todo. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #ffffff;
+      }
+      #frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Mismo sandbox que el preview embebido: sin allow-same-origin, el JS del HTML que
+         genera pandoc NO puede alcanzar window.parent.__TAURI__ (cierra XSS vía .md
+         malicioso). allow-scripts deja correr MathJax. -->
+    <iframe id="frame" sandbox="allow-scripts"></iframe>
+  </body>
+</html>

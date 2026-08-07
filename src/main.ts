@@ -6,7 +6,7 @@ import "@fontsource-variable/jetbrains-mono";
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 // M11: versión en build-time (sin IPC). tsconfig tiene resolveJsonModule, así que el
 // import del package.json es type-safe y lo resuelve Vite al empaquetar.
@@ -244,7 +244,10 @@ function applyTheme(theme: Theme): void {
     item.setAttribute("aria-checked", String(item.dataset.theme === theme));
   });
   // Re-tematizar el preview ya renderizado (editor/chrome se actualizan solos via vars).
-  if (lastPreviewHtml) preview.srcdoc = withTheme(lastPreviewHtml);
+  if (lastPreviewHtml) {
+    preview.srcdoc = withTheme(lastPreviewHtml);
+    pushToPreviewWindow(); // el HTML no cambio, pero si la hoja de estilos del tema
+  }
 }
 
 // Etiquetas de los dialogos nativos de confirmacion. Se arman aca y viajan por IPC:
@@ -274,6 +277,38 @@ const labelsFor = (kind: "open" | "close" | "new") => ({
   ...confirmLabels(kind),
   cancel: t("confirm.cancel"),
 });
+
+// --- M18: ventana de vista previa desacoplada ---
+
+const previewWindowBtn = document.querySelector<HTMLButtonElement>("#preview-window-btn")!;
+
+// Manda el HTML actual a la ventana desacoplada. Se emite SIEMPRE, aunque no haya ventana:
+// un evento sin destinatario no cuesta nada y evita tener que rastrear si esta abierta.
+function pushToPreviewWindow(): void {
+  if (lastPreviewHtml) void emit("preview-html", withTheme(lastPreviewHtml));
+}
+
+// La ventana recien abierta puede tardar en montar su listener, y la principal quiza lleve
+// rato sin renderizar: cuando avisa que esta lista, se le manda el HTML actual para que no
+// arranque en blanco.
+void listen("preview-window-ready", () => pushToPreviewWindow());
+
+async function togglePreviewWindow(): Promise<void> {
+  try {
+    const open = await invoke<boolean>("toggle_preview_window");
+    previewWindowBtn.setAttribute("aria-pressed", String(open));
+    if (open) pushToPreviewWindow();
+  } catch (err) {
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+  }
+}
+
+previewWindowBtn.addEventListener("click", () => void togglePreviewWindow());
+// Si la ventana quedo abierta de una sesion anterior (o de un recargar en dev), el boton
+// tiene que reflejarlo en vez de mentir.
+void invoke<boolean>("preview_window_open")
+  .then((open) => previewWindowBtn.setAttribute("aria-pressed", String(open)))
+  .catch(() => {});
 
 // --- M17: tablas ---
 
@@ -783,6 +818,7 @@ async function render(): Promise<void> {
     const html = await invoke<string>("preview_markdown", { text: getText() });
     lastPreviewHtml = html;
     preview.srcdoc = withTheme(html);
+    pushToPreviewWindow(); // M18: si hay ventana desacoplada, se actualiza con el mismo HTML
   } catch (err) {
     flashStatus(t("status.previewFailed"), 4000);
     preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;

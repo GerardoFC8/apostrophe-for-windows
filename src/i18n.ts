@@ -45,6 +45,7 @@ export interface Messages {
   "view.split": string;
   "view.preview": string;
   "view.previewFrame": string;
+  "view.detach": string;
   "export.action": string;
   "export.hint": string;
   "window.minimize": string;
@@ -151,6 +152,7 @@ const ES: Messages = {
   "view.split": "Dividido (editor y vista)",
   "view.preview": "Solo vista — Ctrl+P cicla",
   "view.previewFrame": "Vista previa",
+  "view.detach": "Vista previa en otra ventana",
   "export.action": "Exportar",
   "export.hint": "Exportar a PDF, HTML, ODT, DOCX, EPUB o LaTeX (Ctrl+E)",
   "window.minimize": "Minimizar",
@@ -256,6 +258,7 @@ const EN: Messages = {
   "view.split": "Split (editor and preview)",
   "view.preview": "Preview only — Ctrl+P cycles",
   "view.previewFrame": "Preview",
+  "view.detach": "Preview in a separate window",
   "export.action": "Export",
   "export.hint": "Export to PDF, HTML, ODT, DOCX, EPUB or LaTeX (Ctrl+E)",
   "window.minimize": "Minimize",
