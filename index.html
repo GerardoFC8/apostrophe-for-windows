@@ -30,6 +30,14 @@
           </svg>
         </button>
         <div class="app-menu theme-menu" id="app-menu" role="menu" hidden>
+          <!-- M16: documentos recientes. La lista la trae el backend (recent_files) ya
+               filtrada de archivos borrados, y main.ts la refresca cada vez que se abre
+               el menú. Va primero por ser una acción, no información. -->
+          <div id="recents-group" hidden>
+            <div class="menu-label" data-i18n="menu.recents"></div>
+            <div id="recent-items" role="group"></div>
+            <div class="menu-sep" role="separator"></div>
+          </div>
           <button class="menu-item" id="menu-shortcuts" type="button" role="menuitem" aria-haspopup="dialog" aria-keyshortcuts="Control+?">
             <span data-i18n="menu.shortcuts"></span>
             <span class="menu-hint"><kbd>Ctrl</kbd>+<kbd>?</kbd></span>

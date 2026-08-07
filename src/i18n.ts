@@ -32,6 +32,7 @@ export interface Messages {
   "menu.shortcuts": string;
   "menu.about": string;
   "menu.language": string;
+  "menu.recents": string;
   "theme.open": string;
   "theme.light": string;
   "theme.dark": string;
@@ -135,6 +136,7 @@ const ES: Messages = {
   "menu.shortcuts": "Atajos de teclado",
   "menu.about": "Acerca de",
   "menu.language": "Idioma",
+  "menu.recents": "Recientes",
   "theme.open": "Tema",
   "theme.light": "Claro",
   "theme.dark": "Oscuro",
@@ -235,6 +237,7 @@ const EN: Messages = {
   "menu.shortcuts": "Keyboard shortcuts",
   "menu.about": "About",
   "menu.language": "Language",
+  "menu.recents": "Recent",
   "theme.open": "Theme",
   "theme.light": "Light",
   "theme.dark": "Dark",

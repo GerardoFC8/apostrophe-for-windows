@@ -225,6 +225,7 @@ body {
   left: 0;
   right: auto;
   min-width: 200px;
+  max-width: 320px; /* techo para que los recientes de nombre largo no lo desborden */
 }
 
 .menu-item {
@@ -245,6 +246,14 @@ body {
 
 .menu-item:hover {
   background: var(--hover);
+}
+
+/* M16: un nombre de archivo largo no debe estirar el popover. Se recorta con puntos
+   suspensivos; la ruta completa sigue disponible en el title del botón. */
+.recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* M15: separador y encabezado de grupo del menú (usados por el selector de idioma). */

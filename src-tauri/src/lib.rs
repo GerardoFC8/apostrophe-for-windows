@@ -18,6 +18,7 @@ use notify_debouncer_full::{
 };
 
 use apostrophe_core::document::DocumentStore;
+use apostrophe_core::recents::Recents;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
 use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager};
@@ -314,7 +315,11 @@ async fn confirm_discard_if_dirty(
 /// Lee un .md de disco a un OpenedDoc y lo fija en el store. Unica fuente del flujo
 /// "leer archivo -> estado del documento", reusada por el dialogo (open_document), el
 /// arranque en frio (setup) y la apertura via asociacion (open_path).
-fn load_path_into_store(path: PathBuf, doc: &Doc) -> Result<OpenedDoc, String> {
+fn load_path_into_store(
+    app: &tauri::AppHandle,
+    path: PathBuf,
+    doc: &Doc,
+) -> Result<OpenedDoc, String> {
     let bytes =
         std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
     let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
@@ -323,12 +328,86 @@ fn load_path_into_store(path: PathBuf, doc: &Doc) -> Result<OpenedDoc, String> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let path_str = path.to_string_lossy().into_owned();
+    // M16: este es el UNICO punto por el que pasa "archivo -> estado del documento"
+    // (dialogo, asociacion .md, arranque en frio y recarga), asi que registrar el reciente
+    // aca cubre todas las vias de apertura sin repetir la llamada en cada camino.
+    remember_recent(app, &path);
     doc.lock().unwrap().open(path, content.clone());
     Ok(OpenedDoc {
         path: path_str,
         file_name,
         content,
     })
+}
+
+// --- M16: documentos recientes ---
+// La lista vive en app_local_data_dir/recents.json (local, NO roaming: son rutas de ESTA
+// maquina, no tiene sentido sincronizarlas). La logica de orden, deduplicacion y recorte
+// es del dominio (`apostrophe_core::recents`); aca solo esta el I/O.
+//
+// Los recientes NO son criticos: si el archivo falta, esta corrupto o el disco falla, se
+// sigue con una lista vacia y el editor funciona igual. Ningun camino propaga el error.
+
+/// Ruta del JSON de recientes, creando el directorio si hace falta.
+fn recents_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("no se pudo resolver app_local_data_dir: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("no se pudo crear el dir de datos: {e}"))?;
+    Ok(dir.join("recents.json"))
+}
+
+/// Lee la lista y descarta de una las rutas que ya no existen: un menu que ofrece abrir
+/// archivos borrados es peor que no tener menu.
+fn load_recents(app: &tauri::AppHandle) -> Recents {
+    let Ok(path) = recents_file(app) else {
+        return Recents::default();
+    };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Recents::default(); // todavia no hay archivo: primera ejecucion
+    };
+    let mut recents: Recents = serde_json::from_str(&raw).unwrap_or_default();
+    recents.retain_existing(|p| p.exists());
+    recents
+}
+
+fn save_recents(app: &tauri::AppHandle, recents: &Recents) {
+    if let (Ok(path), Ok(json)) = (recents_file(app), serde_json::to_string(recents)) {
+        let _ = std::fs::write(path, json); // best-effort
+    }
+}
+
+/// Registra un documento como el mas reciente. Se llama desde el unico punto por el que
+/// pasa "archivo -> estado del documento" y desde guardar-como (que estrena ruta).
+fn remember_recent(app: &tauri::AppHandle, path: &Path) {
+    let mut recents = load_recents(app);
+    recents.push(path.to_path_buf());
+    save_recents(app, &recents);
+}
+
+/// Entrada del menu de recientes: la ruta completa para abrir, el nombre para mostrar.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecentEntry {
+    pub path: String,
+    pub name: String,
+}
+
+/// Lista de recientes ya filtrada (sin archivos borrados), lista para pintar en el menu.
+#[tauri::command]
+fn recent_files(app: tauri::AppHandle) -> Vec<RecentEntry> {
+    load_recents(&app)
+        .paths()
+        .iter()
+        .map(|p| RecentEntry {
+            path: p.to_string_lossy().into_owned(),
+            name: p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string_lossy().into_owned()),
+        })
+        .collect()
 }
 
 /// Textos del dialogo de confirmacion. Los arma el FRONTEND y viajan por IPC: toda la
@@ -373,7 +452,7 @@ async fn open_document(
     let path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
-    let result = load_path_into_store(path, &doc).map(Some);
+    let result = load_path_into_store(&app, path, &doc).map(Some);
     // M8.4b: armar el watcher sobre el archivo recien abierto.
     if result.is_ok() {
         rewatch_doc(&app, &doc);
@@ -397,7 +476,7 @@ async fn open_path(
     {
         return Ok(None);
     }
-    let result = load_path_into_store(PathBuf::from(path), &doc).map(Some);
+    let result = load_path_into_store(&app, PathBuf::from(path), &doc).map(Some);
     // M8.4b: armar el watcher sobre el archivo recien abierto por ruta.
     if result.is_ok() {
         rewatch_doc(&app, &doc);
@@ -476,10 +555,13 @@ async fn new_document(
 /// Si no hay path (documento nuevo), devuelve Ok(None). NO re-arma el watcher porque
 /// solo LEE (no cambia el path ni escribe en disco).
 #[tauri::command]
-async fn reload_from_disk(doc: tauri::State<'_, Doc>) -> Result<Option<OpenedDoc>, String> {
+async fn reload_from_disk(
+    app: tauri::AppHandle,
+    doc: tauri::State<'_, Doc>,
+) -> Result<Option<OpenedDoc>, String> {
     let path = { doc.lock().unwrap().path().cloned() };
     let Some(path) = path else { return Ok(None) };
-    load_path_into_store(path, &doc).map(Some)
+    load_path_into_store(&app, path, &doc).map(Some)
 }
 
 /// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
@@ -570,6 +652,9 @@ async fn save_document_as(
     }
     // Lock BREVE (patron M4): saved_as + set_content bajo un bloque acotado para que
     // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
+    // M16: guardar-como estrena ruta, asi que el documento entra a recientes por ahi.
+    // (Guardar sobre la ruta existente no hace falta: ya entro al abrirse.)
+    remember_recent(&app, &path);
     let status = {
         let mut store = doc.lock().unwrap();
         store.set_content(text);
@@ -1038,7 +1123,7 @@ pub fn run() {
             let argv: Vec<String> = std::env::args().collect();
             if let Some(path) = file_arg(&argv) {
                 let doc = app.state::<Doc>();
-                match load_path_into_store(PathBuf::from(&path), &doc) {
+                match load_path_into_store(app.handle(), PathBuf::from(&path), &doc) {
                     Ok(opened) => {
                         *app.state::<PendingFile>().0.lock().unwrap() = Some(opened);
                         // M8.4b: armar el watcher sobre el archivo del arranque en frio.
@@ -1063,6 +1148,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             preview_markdown,
+            recent_files,
             count_stats,
             set_content,
             open_document,

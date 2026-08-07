@@ -275,6 +275,59 @@ const labelsFor = (kind: "open" | "close" | "new") => ({
   cancel: t("confirm.cancel"),
 });
 
+// --- M16: documentos recientes ---
+
+interface RecentEntry {
+  path: string;
+  name: string;
+}
+
+const recentsGroup = document.querySelector<HTMLElement>("#recents-group")!;
+const recentItems = document.querySelector<HTMLElement>("#recent-items")!;
+
+// Se refresca cada vez que se ABRE el menu, no una sola vez al arrancar: la lista cambia
+// al abrir y al guardar-como, y el backend ya descarta los archivos borrados. Si falla, el
+// grupo queda oculto — unos recientes ausentes no son motivo para romper el menu.
+async function refreshRecents(): Promise<void> {
+  let entries: RecentEntry[] = [];
+  try {
+    entries = await invoke<RecentEntry[]>("recent_files");
+  } catch {
+    /* no critico */
+  }
+  recentsGroup.hidden = entries.length === 0;
+  recentItems.innerHTML = entries
+    .map(
+      (entry) =>
+        `<button class="menu-item recent-item" type="button" role="menuitem" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">` +
+        `<span class="recent-name">${escapeHtml(entry.name)}</span></button>`
+    )
+    .join("");
+  recentItems.querySelectorAll<HTMLButtonElement>(".recent-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      closeAppMenu();
+      void openRecent(item.dataset.path!);
+    });
+  });
+}
+
+// Reusa open_path, el mismo comando de la asociacion .md: trae incluido el guard que
+// confirma antes de descartar cambios sin guardar.
+async function openRecent(path: string): Promise<void> {
+  try {
+    const opened = await invoke<OpenedDoc | null>("open_path", {
+      path,
+      labels: labelsFor("open"),
+    });
+    if (!opened) return; // el usuario decidio no descartar sus cambios
+    setEditorText(opened.content);
+    updateTitlebar(opened.file_name, false);
+    flashStatus(t("status.opened"));
+  } catch (err) {
+    flashStatus(`${t("error.open")}: ${String(err)}`, 4000);
+  }
+}
+
 // Check del item activo, compartido por el menu de temas y el de idiomas.
 const CHECK_ICON =
   '<svg class="check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4 L5 8.9 L9.5 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -398,6 +451,7 @@ function openAppMenu(): void {
   closeThemeMenu(); // solo un popover abierto a la vez
   appMenu.hidden = false;
   menuTrigger.setAttribute("aria-expanded", "true");
+  void refreshRecents(); // M16: la lista se rearma en cada apertura (ver refreshRecents)
 }
 function closeAppMenu(): void {
   appMenu.hidden = true;
