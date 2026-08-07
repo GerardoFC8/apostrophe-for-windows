@@ -40,6 +40,8 @@ tauri-plugin-window-state = "2"
 tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# M20: el SVG de las formulas viaja al webview como data URI, no como archivo.
+base64 = "0.22"
 # M8.4a: autosave por snapshots — id unico de sesion (ya en Cargo.lock como dep transitiva).
 uuid = { version = "1", features = ["v4"] }
 # M8.4a: tokio::time::sleep para el timer de autosave (runtime de Tauri ya usa tokio;

@@ -63,14 +63,24 @@ async fn preview_markdown(app: tauri::AppHandle, text: String) -> Result<String,
 /// Lanza el sidecar pandoc y junta su stdout. Aislado para mantener `preview_markdown`
 /// legible y garantizar el borrado del temporal aunque pandoc falle.
 async fn run_pandoc_sidecar(app: &tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
+    run_sidecar(app, "pandoc", args).await
+}
+
+/// Lanza un sidecar y junta su stdout. Falla con el stderr del proceso, que es lo unico
+/// util cuando pandoc o typst rechazan una entrada.
+async fn run_sidecar(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: Vec<String>,
+) -> Result<String, String> {
     let sidecar = app
         .shell()
-        .sidecar("pandoc")
-        .map_err(|e| format!("no se encontro el sidecar pandoc: {e}"))?;
+        .sidecar(name)
+        .map_err(|e| format!("no se encontro el sidecar {name}: {e}"))?;
     let (mut rx, _child) = sidecar
         .args(args)
         .spawn()
-        .map_err(|e| format!("no se pudo lanzar el sidecar pandoc: {e}"))?;
+        .map_err(|e| format!("no se pudo lanzar el sidecar {name}: {e}"))?;
 
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr = String::new();
@@ -86,9 +96,9 @@ async fn run_pandoc_sidecar(app: &tauri::AppHandle, args: Vec<String>) -> Result
     }
 
     if code != Some(0) {
-        return Err(format!("pandoc devolvio error (codigo {code:?}): {stderr}"));
+        return Err(format!("{name} devolvio error (codigo {code:?}): {stderr}"));
     }
-    String::from_utf8(stdout).map_err(|e| format!("la salida de pandoc no es UTF-8: {e}"))
+    String::from_utf8(stdout).map_err(|e| format!("la salida de {name} no es UTF-8: {e}"))
 }
 
 /// Ruta ABSOLUTA de un sidecar, con la MISMA regla que aplica tauri-plugin-shell en
@@ -201,6 +211,79 @@ async fn inline_target(
     tauri::async_runtime::spawn_blocking(move || apostrophe_core::inline::resolve_at(&text, offset))
         .await
         .map_err(|e| format!("error al resolver el objetivo inline: {e}"))
+}
+
+/// M20: renderiza una formula a SVG y la devuelve como DATA URI, lista para un `<img>`.
+///
+/// El SVG viaja incrustado y no como archivo a proposito: asi el webview NUNCA necesita
+/// leer del disco y no hay que habilitarle el protocolo de assets de Tauri, que le abriria
+/// acceso al sistema de archivos. Un `<img>` con un SVG en data URI tampoco ejecuta scripts
+/// que pudieran venir dentro del SVG.
+///
+/// Son DOS pasos porque el math del markdown es sintaxis LaTeX y typst tiene la suya:
+/// pandoc traduce (`--to typst`) y typst dibuja. Medido en ~64 ms, aceptable para un hover.
+#[tauri::command]
+async fn render_math(
+    app: tauri::AppHandle,
+    source: String,
+    color: String,
+) -> Result<String, String> {
+    use base64::Engine;
+
+    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir();
+    let md = dir.join(format!("apostrophe-math-{}-{}.md", std::process::id(), seq));
+    let typ = dir.join(format!("apostrophe-math-{}-{}.typ", std::process::id(), seq));
+    let svg = dir.join(format!("apostrophe-math-{}-{}.svg", std::process::id(), seq));
+
+    // Paso 1: LaTeX -> sintaxis typst, con el mismo pandoc que ya produce el preview.
+    std::fs::write(&md, format!("${source}$"))
+        .map_err(|e| format!("no se pudo escribir el temporal de la formula: {e}"))?;
+    let translated = run_pandoc_sidecar(
+        &app,
+        vec![
+            md.to_string_lossy().into_owned(),
+            "--from".into(),
+            "markdown".into(),
+            "--to".into(),
+            "typst".into(),
+        ],
+    )
+    .await;
+    let _ = std::fs::remove_file(&md);
+    let translated = translated?;
+
+    // Paso 2: dibujar. El documento (pagina al tamano de la formula, fondo transparente,
+    // color del tema) lo arma el dominio.
+    let document = apostrophe_core::math::typst_document(translated.trim(), &color);
+    std::fs::write(&typ, document)
+        .map_err(|e| format!("no se pudo escribir el documento typst: {e}"))?;
+
+    let engine = sidecar_path("typst")?;
+    if !engine.exists() {
+        return Err("Falta el motor de fórmulas. Ejecuta scripts/fetch-typst.ps1.".into());
+    }
+    let result = run_sidecar(
+        &app,
+        "typst",
+        vec![
+            "compile".into(),
+            typ.to_string_lossy().into_owned(),
+            svg.to_string_lossy().into_owned(),
+            "--format".into(),
+            "svg".into(),
+        ],
+    )
+    .await;
+    let _ = std::fs::remove_file(&typ);
+    result?;
+
+    let bytes = std::fs::read(&svg).map_err(|e| format!("no se pudo leer el SVG: {e}"))?;
+    let _ = std::fs::remove_file(&svg);
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 // --- M4: gestion de documento (abrir / guardar) ---
@@ -1221,6 +1304,7 @@ pub fn run() {
             preview_window_open,
             align_table,
             inline_target,
+            render_math,
             count_stats,
             set_content,
             open_document,

@@ -27,6 +27,9 @@ export interface InlineLabels {
   footnote: string;
   footnoteMissing: string;
   math: string;
+  /// Color con el que se dibuja la fórmula. Sale de la paleta del tema activo: typst pinta
+  /// en negro por defecto, que en tema oscuro sería una fórmula invisible.
+  mathColor: string;
 }
 
 function row(label: string, value: string): HTMLElement {
@@ -47,9 +50,10 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
     case "link":
       return row(labels.link, target.url);
     case "image":
-      // Todavía se muestra la ruta y no la imagen: renderizarla exige habilitar el
-      // protocolo de assets de Tauri, que abre lectura de archivos al webview. Es una
-      // decisión de seguridad que merece su propio slice, no colarse en este.
+      // Todavía se muestra la ruta y no la imagen. NO es una limitación de seguridad: el
+      // mismo camino que usan las fórmulas sirve — Rust lee el archivo y devuelve un data
+      // URI, sin darle acceso al disco al webview. Falta acotar tamaño máximo y formatos
+      // aceptados, y eso es su propio slice.
       return row(labels.image, target.url);
     case "footnote":
       return row(
@@ -57,8 +61,29 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
         target.body || labels.footnoteMissing // sin definición: se avisa, no se calla
       );
     case "math":
-      return row(labels.math, target.source);
+      return mathRow(target.source, labels);
   }
+}
+
+/// Fórmula renderizada. Se pinta primero la fuente y se sustituye por el SVG cuando llega:
+/// el render tarda ~64 ms (dos procesos) y un popover que aparece vacío y luego salta se ve
+/// peor que uno que muestra algo desde el primer frame.
+function mathRow(source: string, labels: InlineLabels): HTMLElement {
+  const wrap = row(labels.math, source);
+  const value = wrap.querySelector<HTMLElement>(".inline-preview-value")!;
+  void invoke<string>("render_math", { source, color: labels.mathColor })
+    .then((dataUri) => {
+      // <img> y NO innerHTML: un SVG incrustado así no ejecuta scripts que pudiera traer.
+      const img = document.createElement("img");
+      img.className = "inline-preview-math";
+      img.src = dataUri;
+      img.alt = source;
+      value.replaceChildren(img);
+    })
+    .catch(() => {
+      /* si el render falla queda la fuente, que ya es informativa */
+    });
+  return wrap;
 }
 
 /// Extensión de CodeMirror que resuelve y muestra el popover.

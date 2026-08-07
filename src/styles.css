@@ -931,3 +931,11 @@ kbd {
   line-height: 1.5;
 }
 /* ====================================================================== */
+
+/* M20: fórmula renderizada dentro del popover. El SVG viene con fondo transparente y en el
+   color del tema, así que solo hace falta acotar su tamaño. */
+.inline-preview-math {
+  display: block;
+  max-width: 100%;
+  max-height: 8em;
+}

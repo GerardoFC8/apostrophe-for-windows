@@ -16,6 +16,7 @@ pub mod document;
 pub mod encoding;
 pub mod inline;
 pub mod markup;
+pub mod math;
 pub mod recents;
 pub mod snapshot;
 pub mod spellcheck;

@@ -52,6 +52,7 @@ name = "apostrophe"
 version = "0.2.0"
 dependencies = [
  "apostrophe-core",
+ "base64 0.22.1",
  "notify-debouncer-full",
  "serde",
  "serde_json",

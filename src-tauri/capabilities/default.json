@@ -27,6 +27,11 @@
           "name": "binaries/pandoc",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "binaries/typst",
+          "sidecar": true,
+          "args": true
         }
       ]
     }
