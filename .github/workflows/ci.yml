@@ -1,0 +1,70 @@
+# Verificación en cada push y pull request. Corre en windows-latest a propósito: es la
+# única plataforma que soporta la app, y `tauri-build` valida que los sidecars declarados
+# en `externalBin` existan para el target triple del host — en Linux fallaría el check del
+# adaptador aunque el dominio compile.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: no tiene sentido pagar
+# minutos por verificar un commit ya superado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # Los sidecars pesan ~270 MB entre pandoc y typst. Se cachean con la clave derivada
+      # del CONTENIDO de los scripts de provisioning, que es donde viven las versiones
+      # pineadas: bumpear un pin invalida el caché solo, sin tener que acordarse de nada.
+      - name: Restaurar sidecars y diccionarios
+        id: cache-sidecars
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/binaries
+            src-tauri/dictionaries
+          key: sidecars-${{ hashFiles('scripts/fetch-*.ps1') }}
+
+      - name: Provisionar sidecars y diccionarios
+        if: steps.cache-sidecars.outputs.cache-hit != 'true'
+        run: |
+          pwsh scripts/fetch-pandoc.ps1
+          pwsh scripts/fetch-typst.ps1
+          pwsh scripts/fetch-dictionaries.ps1
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck del frontend
+        run: pnpm exec tsc --noEmit
+
+      - name: Tests del workspace
+        run: cargo test --workspace
+
+      - name: Clippy sin warnings
+        run: cargo clippy --all-targets -- -D warnings

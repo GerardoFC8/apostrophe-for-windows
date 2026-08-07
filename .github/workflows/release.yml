@@ -1,0 +1,94 @@
+# Publica un release al empujar un tag `vX.Y.Z`. Compila los instaladores en
+# windows-latest (WiX solo corre en Windows) y los adjunta al release.
+#
+# Las notas se toman de `docs/release-notes/<tag>.md` si existe; si no, se generan a partir
+# de los commits. Publicar es un paso MANUAL a propósito: el workflow crea el release como
+# BORRADOR para poder revisar los instaladores antes de que queden a la vista de todos.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# El workflow crea el release y sube los binarios.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Restaurar sidecars y diccionarios
+        id: cache-sidecars
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/binaries
+            src-tauri/dictionaries
+          key: sidecars-${{ hashFiles('scripts/fetch-*.ps1') }}
+
+      - name: Provisionar sidecars y diccionarios
+        if: steps.cache-sidecars.outputs.cache-hit != 'true'
+        run: |
+          pwsh scripts/fetch-pandoc.ps1
+          pwsh scripts/fetch-typst.ps1
+          pwsh scripts/fetch-dictionaries.ps1
+
+      # Primero de todo: la versión del tag debe coincidir con la de tauri.conf.json, o el
+      # instalador saldría con un nombre que no corresponde al release. Falla en segundos,
+      # antes de gastar varios minutos compilando.
+      - name: Comprobar que el tag coincide con la versión declarada
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $conf = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          if ($tag -ne $conf) {
+            throw "El tag ($tag) no coincide con tauri.conf.json ($conf). Alinealos antes de publicar."
+          }
+
+      - run: pnpm install --frozen-lockfile
+
+      # Se verifica ANTES de empaquetar: un tag no debería producir instaladores a partir
+      # de un árbol que no pasa sus propias pruebas.
+      - name: Verificar antes de empaquetar
+        run: |
+          pnpm exec tsc --noEmit
+          cargo test --workspace
+          cargo clippy --all-targets -- -D warnings
+
+      - name: Compilar instaladores
+        run: pnpm tauri build
+
+      - name: Crear el release en borrador
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "docs/release-notes/${{ github.ref_name }}.md"
+          $args = @(
+            "release", "create", "${{ github.ref_name }}",
+            "--draft",
+            "--title", "Apostrophe para Windows ${{ github.ref_name }}"
+          )
+          if (Test-Path $notes) { $args += @("--notes-file", $notes) }
+          else { $args += "--generate-notes" }
+          $args += (Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName
+          $args += (Get-ChildItem target/release/bundle/msi/*.msi).FullName
+          gh @args
