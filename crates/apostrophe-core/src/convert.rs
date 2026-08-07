@@ -46,22 +46,21 @@ pub fn preview_args(opts: &PreviewOptions) -> Vec<String> {
     args
 }
 
-/// Formato de salida para EXPORTAR (M12). Cubre los formatos que el sidecar pandoc
-/// resuelve SOLO, sin binarios extra ni recursos de red:
+/// Formato de salida para EXPORTAR (M12).
 ///
 /// - `Html`, `Latex`, `Epub`: texto/empaquetado propio de pandoc.
 /// - `Odt`, `Docx`: binarios ofimaticos que pandoc genera con sus plantillas internas.
+/// - `Pdf`: pandoc NO sabe generar PDF por su cuenta; delega en un motor externo. Se usa
+///   typst, que se distribuye como segundo sidecar (~21 MB, un unico binario). La
+///   alternativa, xelatex, exigiria TeXLive (gigabytes). Upstream tomo la misma decision.
 ///
-/// Deliberadamente FUERA (cada uno necesita algo que hoy no se distribuye):
-///
-/// - **PDF**: pandoc delega en un motor externo (`--pdf-engine`). Ni `typst` ni
-///   `xelatex` vienen con el sidecar, asi que exportar PDF hoy falla con
-///   "typst not found". Requiere bundlear typst como segundo sidecar (~21 MB).
-/// - **reveal.js / DZSlides**: pandoc emite HTML que referencia `unpkg.com`, asi que
-///   las diapositivas no abren sin internet. Upstream lo evita bundleando reveal.js.
+/// Deliberadamente FUERA: **reveal.js / DZSlides**. Pandoc emite HTML que referencia
+/// `unpkg.com`, asi que las diapositivas no abren sin internet. Upstream lo evita
+/// bundleando reveal.js; mientras no se bundlee, no se ofrecen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     Html,
+    Pdf,
     Odt,
     Docx,
     Epub,
@@ -69,10 +68,13 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
-    /// Todos los formatos soportados, en el orden en que se ofrecen al usuario
-    /// (HTML primero: es el default historico del boton Exportar).
-    pub const ALL: [ExportFormat; 5] = [
+    /// Todos los formatos soportados, en el orden en que se ofrecen al usuario.
+    /// HTML va primero a proposito: es el filtro preseleccionado del dialogo y el
+    /// default historico del boton Exportar. Cambiarlo cambiaria el comportamiento
+    /// de quien solo pulsa Ctrl+E y guarda.
+    pub const ALL: [ExportFormat; 6] = [
         ExportFormat::Html,
+        ExportFormat::Pdf,
         ExportFormat::Odt,
         ExportFormat::Docx,
         ExportFormat::Epub,
@@ -83,6 +85,7 @@ impl ExportFormat {
     pub fn pandoc_to(self) -> &'static str {
         match self {
             ExportFormat::Html => "html5",
+            ExportFormat::Pdf => "pdf",
             ExportFormat::Odt => "odt",
             ExportFormat::Docx => "docx",
             ExportFormat::Epub => "epub",
@@ -94,6 +97,7 @@ impl ExportFormat {
     pub fn extension(self) -> &'static str {
         match self {
             ExportFormat::Html => "html",
+            ExportFormat::Pdf => "pdf",
             ExportFormat::Odt => "odt",
             ExportFormat::Docx => "docx",
             ExportFormat::Epub => "epub",
@@ -105,11 +109,19 @@ impl ExportFormat {
     pub fn display_name(self) -> &'static str {
         match self {
             ExportFormat::Html => "HTML",
+            ExportFormat::Pdf => "Documento PDF",
             ExportFormat::Odt => "Documento de LibreOffice",
             ExportFormat::Docx => "Documento de Word",
             ExportFormat::Epub => "Libro EPUB",
             ExportFormat::Latex => "Documento LaTeX",
         }
+    }
+
+    /// `true` si el formato necesita el sidecar typst para producirse.
+    /// El adaptador lo consulta para resolver la ruta del motor ANTES de lanzar pandoc
+    /// y fallar con un mensaje claro si el sidecar no esta.
+    pub fn needs_pdf_engine(self) -> bool {
+        matches!(self, ExportFormat::Pdf)
     }
 
     /// Deduce el formato desde la extension del archivo que el usuario eligio.
@@ -132,13 +144,29 @@ impl ExportFormat {
     ///   fallaria en Windows con el sidecar. La matematica se resuelve por CDN.
     /// - LaTeX / EPUB: `--standalone` para que la salida sea un documento completo y no
     ///   un fragmento.
-    /// - ODT / DOCX: `--variable=papersize:a4` (igual que upstream). Son binarios que
-    ///   pandoc arma con su plantilla interna: `--standalone` no aplica.
-    fn format_args(self) -> &'static [&'static str] {
+    /// - ODT / DOCX / PDF: `--variable=papersize:a4` (igual que upstream). Los dos
+    ///   primeros son binarios que pandoc arma con su plantilla interna, asi que
+    ///   `--standalone` no aplica.
+    /// - PDF ademas: `--pdf-engine=<ruta>` con la ruta ABSOLUTA del sidecar typst. No
+    ///   alcanza con `--pdf-engine=typst`: pandoc buscaria `typst` en el PATH y el
+    ///   sidecar vive junto al ejecutable de la app, que no esta en el PATH.
+    fn format_args(self, pdf_engine: Option<&str>) -> Vec<String> {
+        let owned = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         match self {
-            ExportFormat::Html => &["--standalone", "--mathjax"],
-            ExportFormat::Latex | ExportFormat::Epub => &["--standalone"],
-            ExportFormat::Odt | ExportFormat::Docx => &["--variable=papersize:a4"],
+            ExportFormat::Html => owned(&["--standalone", "--mathjax"]),
+            ExportFormat::Latex | ExportFormat::Epub => owned(&["--standalone"]),
+            ExportFormat::Odt | ExportFormat::Docx => owned(&["--variable=papersize:a4"]),
+            ExportFormat::Pdf => {
+                let mut args = Vec::new();
+                // Si falta la ruta se omite el flag: pandoc caera de vuelta al PATH y
+                // fallara con "typst not found". El adaptador resuelve la ruta antes de
+                // llegar aca, asi que en la app esta rama no deberia darse.
+                if let Some(engine) = pdf_engine {
+                    args.push(format!("--pdf-engine={engine}"));
+                }
+                args.push("--variable=papersize:a4".to_string());
+                args
+            }
         }
     }
 }
@@ -146,14 +174,21 @@ impl ExportFormat {
 /// Construye los args de pandoc para EXPORTAR a `output_path` en `format`:
 /// `--from markdown --to <fmt> <flags del formato> --output <path>`. El input
 /// (la ruta del temporal con el markdown) lo antepone el adaptador, igual que el preview.
-pub fn export_args(format: ExportFormat, output_path: &str) -> Vec<String> {
+///
+/// `pdf_engine` es la ruta absoluta al sidecar typst. Solo se usa cuando `format` es
+/// `Pdf`; para el resto se ignora (pasar `None` es lo normal).
+pub fn export_args(
+    format: ExportFormat,
+    output_path: &str,
+    pdf_engine: Option<&str>,
+) -> Vec<String> {
     let mut args = vec![
         "--from".to_string(),
         "markdown".to_string(),
         "--to".to_string(),
         format.pandoc_to().to_string(),
     ];
-    args.extend(format.format_args().iter().map(|s| s.to_string()));
+    args.extend(format.format_args(pdf_engine));
     args.push("--output".to_string());
     args.push(output_path.to_string());
     args
@@ -209,7 +244,7 @@ mod tests {
 
     #[test]
     fn export_args_html_tiene_output_y_standalone() {
-        let args = export_args(ExportFormat::Html, "/tmp/out.html");
+        let args = export_args(ExportFormat::Html, "/tmp/out.html", None);
         assert_eq!(
             args,
             [
@@ -232,7 +267,7 @@ mod tests {
         // ODT/DOCX son binarios armados con la plantilla interna de pandoc: --standalone
         // no aplica, y --mathjax tampoco (no hay HTML donde cargar el script).
         assert_eq!(
-            export_args(ExportFormat::Odt, "/tmp/out.odt"),
+            export_args(ExportFormat::Odt, "/tmp/out.odt", None),
             [
                 "--from",
                 "markdown",
@@ -248,7 +283,7 @@ mod tests {
     #[test]
     fn export_args_docx_usa_papersize_y_no_standalone() {
         assert_eq!(
-            export_args(ExportFormat::Docx, "/tmp/out.docx"),
+            export_args(ExportFormat::Docx, "/tmp/out.docx", None),
             [
                 "--from",
                 "markdown",
@@ -264,11 +299,11 @@ mod tests {
     #[test]
     fn export_args_latex_y_epub_son_standalone_sin_mathjax() {
         assert_eq!(
-            export_args(ExportFormat::Latex, "/tmp/out.tex"),
+            export_args(ExportFormat::Latex, "/tmp/out.tex", None),
             ["--from", "markdown", "--to", "latex", "--standalone", "--output", "/tmp/out.tex"]
         );
         assert_eq!(
-            export_args(ExportFormat::Epub, "/tmp/out.epub"),
+            export_args(ExportFormat::Epub, "/tmp/out.epub", None),
             ["--from", "markdown", "--to", "epub", "--standalone", "--output", "/tmp/out.epub"]
         );
     }
@@ -277,7 +312,7 @@ mod tests {
     fn html_nunca_incrusta_recursos() {
         // Regresion: --embed-resources junto a --mathjax hace que pandoc busque MathJax
         // en una ruta local del sistema y la exportacion falle en Windows. Ver format_args.
-        let args = export_args(ExportFormat::Html, "/tmp/out.html");
+        let args = export_args(ExportFormat::Html, "/tmp/out.html", None);
         assert!(!args.iter().any(|a| a.contains("embed-resources")));
     }
 
@@ -297,10 +332,81 @@ mod tests {
 
     #[test]
     fn from_extension_rechaza_formatos_no_soportados() {
-        // PDF necesita un motor externo (typst/xelatex) que hoy no se distribuye.
-        assert_eq!(ExportFormat::from_extension("pdf"), None);
         assert_eq!(ExportFormat::from_extension("md"), None);
+        assert_eq!(ExportFormat::from_extension("docm"), None);
         assert_eq!(ExportFormat::from_extension(""), None);
+    }
+
+    // --- M13: PDF via sidecar typst ---
+
+    #[test]
+    fn export_args_pdf_usa_la_ruta_absoluta_del_motor() {
+        // `--pdf-engine=typst` a secas NO sirve: pandoc lo buscaria en el PATH y el
+        // sidecar vive junto al ejecutable de la app. Tiene que ir la ruta completa.
+        assert_eq!(
+            export_args(ExportFormat::Pdf, "/tmp/out.pdf", Some("/opt/app/typst")),
+            [
+                "--from",
+                "markdown",
+                "--to",
+                "pdf",
+                "--pdf-engine=/opt/app/typst",
+                "--variable=papersize:a4",
+                "--output",
+                "/tmp/out.pdf"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_args_pdf_admite_rutas_con_espacios() {
+        // El clon de Windows vive bajo "PROYECTOS DEMO": la ruta llega con espacios y
+        // debe viajar como UN solo argumento, sin comillas ni escapes agregados.
+        let args = export_args(
+            ExportFormat::Pdf,
+            "/tmp/out.pdf",
+            Some(r"C:\PROYECTOS DEMO\typst.exe"),
+        );
+        assert!(args.contains(&r"--pdf-engine=C:\PROYECTOS DEMO\typst.exe".to_string()));
+    }
+
+    #[test]
+    fn export_args_pdf_sin_motor_omite_el_flag() {
+        let args = export_args(ExportFormat::Pdf, "/tmp/out.pdf", None);
+        assert!(!args.iter().any(|a| a.starts_with("--pdf-engine")));
+        assert!(args.contains(&"--variable=papersize:a4".to_string()));
+    }
+
+    #[test]
+    fn el_motor_pdf_no_contamina_otros_formatos() {
+        // Pasar la ruta con un formato que no es PDF no debe agregar el flag.
+        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+            let args = export_args(format, "/tmp/out", Some("/opt/app/typst"));
+            assert!(
+                !args.iter().any(|a| a.starts_with("--pdf-engine")),
+                "{format:?} no deberia recibir --pdf-engine"
+            );
+        }
+    }
+
+    #[test]
+    fn solo_pdf_necesita_motor_externo() {
+        for format in ExportFormat::ALL {
+            assert_eq!(
+                format.needs_pdf_engine(),
+                format == ExportFormat::Pdf,
+                "{format:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pdf_esta_en_la_lista_y_html_sigue_primero() {
+        // El primer formato es el filtro preseleccionado del dialogo: si HTML dejara de
+        // ir primero, cambiaria en silencio lo que obtiene quien solo pulsa Ctrl+E.
+        assert_eq!(ExportFormat::ALL[0], ExportFormat::Html);
+        assert!(ExportFormat::ALL.contains(&ExportFormat::Pdf));
+        assert_eq!(ExportFormat::from_extension("pdf"), Some(ExportFormat::Pdf));
     }
 
     #[test]

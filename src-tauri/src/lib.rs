@@ -90,6 +90,32 @@ async fn run_pandoc_sidecar(app: &tauri::AppHandle, args: Vec<String>) -> Result
     String::from_utf8(stdout).map_err(|e| format!("la salida de pandoc no es UTF-8: {e}"))
 }
 
+/// Ruta ABSOLUTA de un sidecar, con la MISMA regla que aplica tauri-plugin-shell en
+/// `relative_command_path`: el binario vive junto al ejecutable actual, con el nombre
+/// pelado (Tauri quita el target triple al empaquetar) y `.exe` en Windows.
+///
+/// Se replica aca porque el plugin solo expone un `Command`, no la ruta, y para el PDF
+/// necesitamos pasarle esa ruta a pandoc por `--pdf-engine`: pandoc lanza el motor el
+/// mismo, y buscaria `typst` en el PATH, donde el sidecar NO esta.
+fn sidecar_path(name: &str) -> Result<std::path::PathBuf, String> {
+    let exe = tauri::utils::platform::current_exe()
+        .map_err(|e| format!("no se pudo ubicar el ejecutable: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "el ejecutable no tiene directorio padre".to_string())?;
+    // Bajo `cargo test` el binario queda en deps/; el sidecar esta un nivel arriba.
+    let base = if dir.ends_with("deps") {
+        dir.parent().unwrap_or(dir)
+    } else {
+        dir
+    };
+    let mut path = base.join(name);
+    if cfg!(windows) {
+        path.as_mut_os_string().push(".exe");
+    }
+    Ok(path)
+}
+
 /// Adaptador primario (IPC): expone el contador de stats del dominio. La logica
 /// vive en `apostrophe_core::stats`; este comando solo cruza la frontera hexagonal.
 /// La frontera es gruesa y con debounce (ADR-0001): se manda el texto, vuelve Stats.
@@ -628,6 +654,21 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
     };
     let out_str = out_path.to_string_lossy().into_owned();
 
+    // PDF lo produce typst, no pandoc: se resuelve la ruta del sidecar ANTES de lanzar
+    // nada, para fallar con un mensaje util en vez del "typst not found" de pandoc.
+    let pdf_engine = if format.needs_pdf_engine() {
+        let engine = sidecar_path("typst")?;
+        if !engine.exists() {
+            return Err(
+                "Falta el motor de PDF. Ejecuta scripts/fetch-typst.ps1 y vuelve a compilar."
+                    .to_string(),
+            );
+        }
+        Some(engine.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+
     // Markdown a un temporal; pandoc exporta con --output a la ruta elegida.
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!(
@@ -639,7 +680,7 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
         .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
 
     let mut args = vec![tmp.to_string_lossy().into_owned()];
-    args.extend(export_args(format, &out_str));
+    args.extend(export_args(format, &out_str, pdf_engine.as_deref()));
 
     let result = run_pandoc_sidecar(&app, args).await;
     let _ = std::fs::remove_file(&tmp);

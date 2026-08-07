@@ -6,7 +6,8 @@
 # will have schema files for capabilities auto-completion
 /gen/schemas
 
-# Sidecars provisionados por scripts/fetch-pandoc.ps1 (no se commitean: ~150MB)
+# Sidecars provisionados por scripts/fetch-pandoc.ps1 y scripts/fetch-typst.ps1
+# (no se commitean: pandoc ~150MB, typst ~21MB)
 /binaries/
 
 # Diccionarios Hunspell provisionados por scripts/fetch-dictionaries.ps1 (no se commitean)

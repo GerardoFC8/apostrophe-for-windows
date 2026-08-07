@@ -11,13 +11,9 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
 - Vista previa en vivo vía **pandoc** (bundleado como sidecar, sin dependencias del sistema).
 - Abrir / guardar `.md` con diálogos nativos.
 - Temas claro / oscuro / sepia.
-- Exportación a **HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en el
-  desplegable "Guardar como tipo" del diálogo. Todo lo resuelve el sidecar pandoc: no
-  necesitas instalar nada más.
-
-  > **PDF todavía no.** Pandoc delega el PDF en un motor externo (`typst` o `xelatex`) que
-  > no viene con el sidecar. Se resolverá bundleando typst (~21 MB), igual que hace
-  > Apostrophe upstream.
+- Exportación a **PDF, HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en
+  el desplegable "Guardar como tipo" del diálogo. Lo resuelven los sidecars bundleados
+  (pandoc y typst): no necesitas instalar nada más.
 - Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
 
 ## Requisitos de desarrollo
@@ -29,14 +25,18 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
 
 ## Puesta en marcha (dev)
 
-Los binarios pesados (pandoc ~150 MB) y los diccionarios Hunspell **no se commitean**:
-están gitignored y se provisionan con scripts. Antes del primer `dev`/`build`, ejecutá
-los scripts de provisioning desde PowerShell:
+Los binarios pesados (pandoc ~150 MB, typst ~21 MB) y los diccionarios Hunspell **no se
+commitean**: están gitignored y se provisionan con scripts. Antes del primer
+`dev`/`build`, ejecuta los scripts de provisioning desde PowerShell:
 
 ```powershell
 pwsh scripts/fetch-pandoc.ps1        # baja pandoc-x86_64-pc-windows-msvc.exe (sidecar)
+pwsh scripts/fetch-typst.ps1         # baja typst-x86_64-pc-windows-msvc.exe (motor de PDF)
 pwsh scripts/fetch-dictionaries.ps1  # baja los diccionarios Hunspell (es, en)
 ```
+
+> El pin de pandoc debe ser **3.9 o superior**. El template typst de 3.7 emitía una lista
+> de fuentes vacía que typst 0.15 rechaza, y la exportación a PDF fallaba.
 
 Luego, dev con hot-reload:
 
