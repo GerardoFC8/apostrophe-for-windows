@@ -574,7 +574,9 @@ async function saveDocAs(): Promise<void> {
   }
 }
 
-// M5: exportar a HTML (dialogo "guardar como .html" + pandoc sidecar).
+// M12: exportar (dialogo nativo con un filtro por formato + pandoc sidecar). El formato
+// lo decide la extension que elijas en el dialogo; el backend la traduce y avisa si no
+// esta soportada.
 async function exportDoc(): Promise<void> {
   status.textContent = "exportando…"; // en-progreso (sin auto-limpiar hasta terminar)
   try {

@@ -580,19 +580,26 @@ async fn save_document_as(
     Ok(Some(status))
 }
 
-/// Exporta el markdown a un archivo HTML elegido por el usuario (dialogo nativo).
+/// Exporta el markdown al formato que el usuario elija en el dialogo nativo (M12).
 /// Reusa el sidecar pandoc via el Converter port (export_args). Devuelve la ruta de
 /// salida, o `None` si se cancela. `async` + spawn_blocking (gotcha deadlock M4).
+///
+/// El dialogo ofrece un filtro por formato ("Guardar como tipo") pero devuelve SOLO la
+/// ruta, sin decir cual quedo seleccionado: por eso el formato se deduce de la extension
+/// del archivo resultante. En Windows el dialogo agrega la extension del filtro elegido,
+/// asi que elegir "Documento de Word" produce `.docx` y de ahi sale el formato.
 #[tauri::command]
 async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<String>, String> {
     use apostrophe_core::convert::{export_args, ExportFormat};
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app2.dialog()
-            .file()
-            .add_filter("HTML", &[ExportFormat::Html.extension()])
-            .set_file_name("documento.html")
+        let mut dialog = app2.dialog().file();
+        for format in ExportFormat::ALL {
+            dialog = dialog.add_filter(format.display_name(), &[format.extension()]);
+        }
+        dialog
+            .set_file_name(format!("documento.{}", ExportFormat::Html.extension()))
             .blocking_save_file()
     })
     .await
@@ -604,6 +611,21 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
     let out_path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
+
+    let extension = out_path
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let Some(format) = ExportFormat::from_extension(&extension) else {
+        // Pasa si escribes el nombre a mano con una extension que no soportamos
+        // (p. ej. `.pdf`, que necesita un motor externo que no se distribuye).
+        return Err(format!(
+            "No se puede exportar a «{extension}». Formatos disponibles: {}.",
+            ExportFormat::ALL
+                .map(|f| f.extension())
+                .join(", ")
+        ));
+    };
     let out_str = out_path.to_string_lossy().into_owned();
 
     // Markdown a un temporal; pandoc exporta con --output a la ruta elegida.
@@ -617,7 +639,7 @@ async fn export_document(app: tauri::AppHandle, text: String) -> Result<Option<S
         .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
 
     let mut args = vec![tmp.to_string_lossy().into_owned()];
-    args.extend(export_args(ExportFormat::Html, &out_str));
+    args.extend(export_args(format, &out_str));
 
     let result = run_pandoc_sidecar(&app, args).await;
     let _ = std::fs::remove_file(&tmp);

@@ -10,7 +10,14 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
 - Editor CodeMirror 6 con titlebar Fluent custom.
 - Vista previa en vivo vía **pandoc** (bundleado como sidecar, sin dependencias del sistema).
 - Abrir / guardar `.md` con diálogos nativos.
-- Temas claro / oscuro / sepia + exportación a HTML.
+- Temas claro / oscuro / sepia.
+- Exportación a **HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en el
+  desplegable "Guardar como tipo" del diálogo. Todo lo resuelve el sidecar pandoc: no
+  necesitas instalar nada más.
+
+  > **PDF todavía no.** Pandoc delega el PDF en un motor externo (`typst` o `xelatex`) que
+  > no viene con el sidecar. Se resolverá bundleando typst (~21 MB), igual que hace
+  > Apostrophe upstream.
 - Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
 
 ## Requisitos de desarrollo
