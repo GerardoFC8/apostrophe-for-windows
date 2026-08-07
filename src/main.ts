@@ -194,19 +194,23 @@ function previewStyle(): string {
   return markdownStylesheet((name) => cs.getPropertyValue(name).trim());
 }
 
-// Hoja de estilos para EXPORTAR: siempre con la paleta CLARA, sin importar el tema
-// activo. Un HTML o un PDF de fondo oscuro es incomodo de leer y de imprimir, y quien
-// lo recibe no eligio tu tema. Se lee de un elemento sonda con data-theme="light"
-// porque las vars del tema activo estan en <html> y se heredan a todo el arbol.
-function exportStyle(): string {
+// Tema para EXPORTAR: siempre la paleta CLARA, sin importar el tema activo. Un HTML o un
+// PDF de fondo oscuro es incomodo de leer y de imprimir, y quien lo recibe no eligio tu
+// tema. Se lee de un elemento sonda con data-theme="light" porque las vars del tema
+// activo viven en <html> y se heredan a todo el arbol.
+//
+// Devuelve las dos piezas que necesita el backend: la hoja de estilos (para el <head> del
+// HTML) y el acento suelto (para el color de enlaces del PDF, que no entiende CSS).
+function exportTheme(): { css: string; accent: string } {
   const probe = document.createElement("div");
   probe.dataset.theme = "light";
   probe.hidden = true;
   document.body.appendChild(probe);
   const cs = getComputedStyle(probe);
-  const css = markdownStylesheet((name) => cs.getPropertyValue(name).trim());
+  const v = (name: string) => cs.getPropertyValue(name).trim();
+  const theme = { css: markdownStylesheet(v), accent: v("--accent") };
   probe.remove();
-  return css;
+  return theme;
 }
 
 // Inyecta el <style> del tema en el HTML standalone de pandoc (inline -> anda en el
@@ -601,9 +605,11 @@ async function saveDocAs(): Promise<void> {
 async function exportDoc(): Promise<void> {
   status.textContent = "exportando…"; // en-progreso (sin auto-limpiar hasta terminar)
   try {
+    const { css, accent } = exportTheme();
     const out = await invoke<string | null>("export_document", {
       text: getText(),
-      css: exportStyle(),
+      css,
+      accent,
     });
     if (out) flashStatus("exportado");
     else status.textContent = ""; // cancelado

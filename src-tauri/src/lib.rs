@@ -619,6 +619,7 @@ async fn export_document(
     app: tauri::AppHandle,
     text: String,
     css: String,
+    accent: String,
 ) -> Result<Option<String>, String> {
     use apostrophe_core::convert::{export_args, ExportFormat, ExportOptions};
 
@@ -703,6 +704,7 @@ async fn export_document(
     let opts = ExportOptions {
         pdf_engine: pdf_engine.as_deref(),
         header_include: header_str.as_deref(),
+        link_color: (!accent.is_empty()).then_some(accent.as_str()),
     };
     let mut args = vec![tmp.to_string_lossy().into_owned()];
     args.extend(export_args(format, &out_str, &opts));

@@ -175,14 +175,39 @@ impl ExportFormat {
                     args.push(format!("--pdf-engine={engine}"));
                 }
                 args.push("--variable=papersize:a4".to_string());
+                args.extend(owned(PDF_TYPOGRAPHY));
+                if let Some(color) = opts.link_color {
+                    // typst quiere el hex SIN `#`. La plantilla de pandoc genera
+                    // `rgb(content-to-string(linkcolor))`, y `[#3584e4]` en typst es
+                    // CODIGO: evalua 3584e4 como notacion cientifica (35 840 000), el
+                    // color sale invalido y el texto del enlace se vuelve invisible.
+                    args.push(format!("--variable=linkcolor:{}", color.trim_start_matches('#')));
+                }
                 args
             }
         }
     }
 }
 
-/// Entradas OPCIONALES del export que dependen del entorno (rutas que solo el adaptador
-/// conoce). Cada una la consume un unico formato; el resto las ignora.
+/// Tipografia del PDF, alineada con el preview (`markdownStylesheet` en `main.ts`).
+///
+/// El preview pide `system-ui`, que en Windows resuelve a **Segoe UI**, y `ui-monospace`,
+/// que resuelve a **Consolas**: nombrarlas explicitamente no aproxima el aspecto del
+/// preview, usa la misma fuente. `linestretch` replica el `line-height:1.6` del preview.
+///
+/// Si una fuente no existe (por ejemplo al desarrollar en WSL), typst solo emite un
+/// warning y cae a su fuente por defecto — el PDF se genera igual.
+const PDF_TYPOGRAPHY: &[&str] = &[
+    "--variable=mainfont:Segoe UI",
+    "--variable=codefont:Consolas",
+    "--variable=fontsize:11pt",
+    "--variable=linestretch:1.6",
+    "--variable=margin.x:2.5cm",
+    "--variable=margin.y:2.5cm",
+];
+
+/// Entradas OPCIONALES del export que dependen del entorno (rutas y colores que solo el
+/// adaptador conoce). Cada una la consume un unico formato; el resto las ignora.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ExportOptions<'a> {
     /// Ruta absoluta al sidecar typst. Solo la usa `Pdf`.
@@ -190,6 +215,10 @@ pub struct ExportOptions<'a> {
     /// Ruta a un fragmento HTML (un `<style>`) que se inyecta en el `<head>`.
     /// Solo la usa `Html`. Es como viaja la hoja de estilos del preview al archivo.
     pub header_include: Option<&'a str>,
+    /// Color de los enlaces en hex, con o sin `#`. Solo lo usa `Pdf`; en HTML el color
+    /// ya viaja dentro de la hoja de estilos. Sale de la misma var `--accent` del tema,
+    /// para no tener dos fuentes de verdad del color de acento.
+    pub link_color: Option<&'a str>,
 }
 
 /// Construye los args de pandoc para EXPORTAR a `output_path` en `format`:
@@ -358,18 +387,90 @@ mod tests {
         // `--pdf-engine=typst` a secas NO sirve: pandoc lo buscaria en el PATH y el
         // sidecar vive junto al ejecutable de la app. Tiene que ir la ruta completa.
         assert_eq!(
-            export_args(ExportFormat::Pdf, "/tmp/out.pdf", &ExportOptions { pdf_engine: Some("/opt/app/typst"), ..Default::default() }),
+            &export_args(
+                ExportFormat::Pdf,
+                "/tmp/out.pdf",
+                &ExportOptions {
+                    pdf_engine: Some("/opt/app/typst"),
+                    ..Default::default()
+                }
+            )[..5],
             [
                 "--from",
                 "markdown",
                 "--to",
                 "pdf",
-                "--pdf-engine=/opt/app/typst",
-                "--variable=papersize:a4",
-                "--output",
-                "/tmp/out.pdf"
+                "--pdf-engine=/opt/app/typst"
             ]
         );
+    }
+
+    #[test]
+    fn pdf_lleva_la_tipografia_del_preview() {
+        let args = export_args(
+            ExportFormat::Pdf,
+            "/tmp/out.pdf",
+            &ExportOptions {
+                pdf_engine: Some("/opt/app/typst"),
+                ..Default::default()
+            },
+        );
+        // system-ui y ui-monospace del preview resuelven a estas dos en Windows.
+        assert!(args.contains(&"--variable=mainfont:Segoe UI".to_string()));
+        assert!(args.contains(&"--variable=codefont:Consolas".to_string()));
+        // line-height:1.6 del preview.
+        assert!(args.contains(&"--variable=linestretch:1.6".to_string()));
+        assert_eq!(args.last().unwrap(), "/tmp/out.pdf");
+    }
+
+    #[test]
+    fn la_tipografia_del_pdf_no_contamina_otros_formatos() {
+        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+            let args = export_args(format, "/tmp/out", &ExportOptions::default());
+            assert!(
+                !args.iter().any(|a| a.contains("mainfont") || a.contains("linestretch")),
+                "{format:?} no deberia recibir tipografia de PDF"
+            );
+        }
+    }
+
+    #[test]
+    fn el_color_de_enlace_del_pdf_va_sin_almohadilla() {
+        // Regresion de un bug que solo se ve renderizando: la plantilla typst de pandoc
+        // hace `rgb(content-to-string(linkcolor))`, y `[#3584e4]` es CODIGO en typst —
+        // evalua 3584e4 como notacion cientifica. El color queda invalido y el texto del
+        // enlace se vuelve INVISIBLE en el PDF. Sin `#`, se lee como texto y funciona.
+        for entrada in ["#3584e4", "3584e4"] {
+            let args = export_args(
+                ExportFormat::Pdf,
+                "/tmp/out.pdf",
+                &ExportOptions {
+                    link_color: Some(entrada),
+                    ..Default::default()
+                },
+            );
+            assert!(
+                args.contains(&"--variable=linkcolor:3584e4".to_string()),
+                "entrada {entrada:?} deberia normalizarse sin almohadilla"
+            );
+            assert!(!args.iter().any(|a| a.contains('#')));
+        }
+    }
+
+    #[test]
+    fn el_color_de_enlace_no_contamina_otros_formatos() {
+        // En HTML el color ya viaja dentro de la hoja de estilos.
+        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+            let args = export_args(
+                format,
+                "/tmp/out",
+                &ExportOptions {
+                    link_color: Some("#3584e4"),
+                    ..Default::default()
+                },
+            );
+            assert!(!args.iter().any(|a| a.contains("linkcolor")), "{format:?}");
+        }
     }
 
     #[test]
