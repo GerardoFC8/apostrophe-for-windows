@@ -38,8 +38,19 @@ static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
 ///
 /// TODO(ADR-0001): theme (`--css`), base_path, lua-filter y highlight-style cuando
 /// existan los assets de tema (M5).
+///
+/// Antes de devolverlo, las imagenes LOCALES del HTML se incrustan como data URI. El preview
+/// es un `iframe` con `srcdoc` en un sandbox: ahi un `src="C:/fotos/a.png"` se lee como URL
+/// relativa y la imagen sale rota. Incrustarla la arregla sin darle al webview acceso al
+/// disco, que es el mismo criterio de `render_math` y `render_image`.
 #[tauri::command]
-async fn preview_markdown(app: tauri::AppHandle, text: String) -> Result<String, String> {
+async fn preview_markdown(
+    app: tauri::AppHandle,
+    doc: tauri::State<'_, Doc>,
+    text: String,
+) -> Result<String, String> {
+    // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
+    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!(
         "apostrophe-preview-{}-{}.md",
@@ -57,7 +68,17 @@ async fn preview_markdown(app: tauri::AppHandle, text: String) -> Result<String,
 
     let result = run_pandoc_sidecar(&app, args).await;
     let _ = std::fs::remove_file(&tmp); // limpieza best-effort, pase lo que pase
-    result
+    let html = result?;
+
+    // Leer y codificar cada imagen es I/O bloqueante: va fuera del hilo de eventos. Lo que
+    // no se pueda incrustar (remota, ausente, muy grande) conserva su `src` original.
+    tauri::async_runtime::spawn_blocking(move || {
+        apostrophe_core::image::rewrite_img_srcs(&html, |src| {
+            image_data_uri(src, doc_dir.as_deref()).ok()
+        })
+    })
+    .await
+    .map_err(|e| format!("error al incrustar las imagenes del preview: {e}"))
 }
 
 /// Lanza el sidecar pandoc y junta su stdout. Aislado para mantener `preview_markdown`

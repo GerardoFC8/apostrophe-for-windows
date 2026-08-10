@@ -128,6 +128,70 @@ pub fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
     None
 }
 
+/// Reemplaza el `src` de cada `<img>` del HTML por lo que devuelva `resolve`.
+///
+/// El preview es un `iframe` con `srcdoc` en un sandbox: ahi dentro un `src="C:/fotos/a.png"`
+/// se interpreta como una URL relativa, no como un archivo, y la imagen sale rota. Se
+/// resuelve incrustando el contenido, el mismo camino que el popover — asi el webview sigue
+/// sin poder leer del disco.
+///
+/// `resolve` recibe el `src` original y devuelve el reemplazo, o `None` para dejarlo como
+/// esta (imagen remota, archivo ausente, demasiado grande). Que sea un callback mantiene el
+/// I/O afuera: aca solo vive el recorrido del HTML, que es lo que conviene tener con pruebas.
+pub fn rewrite_img_srcs(html: &str, mut resolve: impl FnMut(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+
+    while let Some(start) = rest.find("<img") {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+
+        // Sin cierre el HTML esta truncado: se copia lo que queda y se corta, en vez de
+        // arriesgar un reemplazo sobre una etiqueta a medias.
+        let Some(close) = rest.find('>') else {
+            break;
+        };
+        let (tag, tail) = rest.split_at(close + 1);
+        rest = tail;
+
+        match find_src_value(tag) {
+            Some((from, to)) => match resolve(&tag[from..to]) {
+                Some(replacement) => {
+                    out.push_str(&tag[..from]);
+                    out.push_str(&replacement);
+                    out.push_str(&tag[to..]);
+                }
+                None => out.push_str(tag),
+            },
+            None => out.push_str(tag),
+        }
+    }
+
+    out.push_str(rest);
+    out
+}
+
+/// Rango del VALOR del atributo `src` dentro de una etiqueta, sin las comillas.
+///
+/// Se exige un espacio delante para no confundirlo con `data-src=` ni con un `src=` que
+/// aparezca dentro de otro atributo.
+fn find_src_value(tag: &str) -> Option<(usize, usize)> {
+    let bytes = tag.as_bytes();
+    let mut from = 0;
+    while let Some(rel) = tag[from..].find("src=") {
+        let at = from + rel;
+        let quote = bytes.get(at + 4).copied();
+        let preceded_by_space = at > 0 && bytes[at - 1].is_ascii_whitespace();
+        if preceded_by_space && (quote == Some(b'"') || quote == Some(b'\'')) {
+            let start = at + 5;
+            let end = start + tag[start..].find(quote? as char)?;
+            return Some((start, end));
+        }
+        from = at + 4;
+    }
+    None
+}
+
 /// `true` si la ruta es absoluta en POSIX o en Windows.
 ///
 /// No se usa `Path::is_absolute` porque depende de la plataforma que COMPILA: en WSL, donde
@@ -342,5 +406,81 @@ mod tests {
     fn una_firma_valida_pero_truncada_no_se_confunde() {
         assert_eq!(sniff_format(b"RIFF\x00\x00\x00\x00"), None); // RIFF sin el marcador WEBP
         assert_eq!(sniff_format(b"\x89PNG"), None);
+    }
+
+    /// Resolutor de mentira para las pruebas del reescritor: incrusta todo lo que no sea
+    /// remoto, para que se vea que el HTML se rearma bien.
+    fn fake(src: &str) -> Option<String> {
+        if src.starts_with("http") {
+            None
+        } else {
+            Some(format!("data:image/png;base64,AAAA({src})"))
+        }
+    }
+
+    #[test]
+    fn el_src_de_una_imagen_se_reemplaza_conservando_el_resto_de_la_etiqueta() {
+        let html = r#"<p>antes</p><img src="a.png" alt="gato" /><p>despues</p>"#;
+        assert_eq!(
+            rewrite_img_srcs(html, fake),
+            r#"<p>antes</p><img src="data:image/png;base64,AAAA(a.png)" alt="gato" /><p>despues</p>"#
+        );
+    }
+
+    #[test]
+    fn pandoc_parte_la_etiqueta_en_varias_lineas_y_se_reescribe_igual() {
+        // Es la forma REAL de la salida de pandoc: atributos separados por saltos de linea.
+        let html = "<figure>\n<img\nsrc=\"C:/fotos/a.png\"\nalt=\"cap\" />\n</figure>";
+        let out = rewrite_img_srcs(html, fake);
+        assert!(out.contains("src=\"data:image/png;base64,AAAA(C:/fotos/a.png)\""), "{out}");
+        assert!(out.contains("alt=\"cap\""), "el resto de la etiqueta se conserva: {out}");
+    }
+
+    #[test]
+    fn lo_que_el_resolutor_rechaza_queda_intacto() {
+        // Una imagen remota tiene que seguir apuntando a su URL: el iframe la cargara solo.
+        let html = r#"<img src="https://example.com/a.png" alt="x" />"#;
+        assert_eq!(rewrite_img_srcs(html, fake), html);
+    }
+
+    #[test]
+    fn se_reescriben_todas_las_imagenes_del_documento() {
+        let html = r#"<img src="a.png" /><p>medio</p><img src="b.png" />"#;
+        let out = rewrite_img_srcs(html, fake);
+        assert!(out.contains("AAAA(a.png)"), "{out}");
+        assert!(out.contains("AAAA(b.png)"), "{out}");
+        assert!(out.contains("<p>medio</p>"), "no se pierde lo que hay en el medio: {out}");
+    }
+
+    #[test]
+    fn no_se_confunde_con_otros_atributos_ni_otras_etiquetas() {
+        // `data-src` termina en `src=`; sin el guard del espacio delante, se reescribiria.
+        let html = r#"<img data-src="a.png" alt="x" /><video src="v.mp4"></video>"#;
+        assert_eq!(rewrite_img_srcs(html, fake), html);
+    }
+
+    #[test]
+    fn se_aceptan_las_comillas_simples() {
+        let html = "<img src='a.png' />";
+        assert_eq!(rewrite_img_srcs(html, fake), "<img src='data:image/png;base64,AAAA(a.png)' />");
+    }
+
+    #[test]
+    fn un_html_sin_imagenes_vuelve_igual() {
+        let html = "<h1>Titulo</h1><p>Texto con &lt;img&gt; escapado.</p>";
+        assert_eq!(rewrite_img_srcs(html, fake), html);
+    }
+
+    #[test]
+    fn una_etiqueta_truncada_no_pierde_texto_ni_entra_en_bucle() {
+        // Si pandoc devolviera algo cortado, el preview tiene que mostrar lo que haya.
+        let html = "<p>ok</p><img src=\"a.png\"";
+        assert_eq!(rewrite_img_srcs(html, fake), html);
+    }
+
+    #[test]
+    fn una_imagen_sin_src_se_deja_como_esta() {
+        let html = r#"<img alt="sin fuente" />"#;
+        assert_eq!(rewrite_img_srcs(html, fake), html);
     }
 }
