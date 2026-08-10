@@ -50,11 +50,7 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
     case "link":
       return row(labels.link, target.url);
     case "image":
-      // Todavía se muestra la ruta y no la imagen. NO es una limitación de seguridad: el
-      // mismo camino que usan las fórmulas sirve — Rust lee el archivo y devuelve un data
-      // URI, sin darle acceso al disco al webview. Falta acotar tamaño máximo y formatos
-      // aceptados, y eso es su propio slice.
-      return row(labels.image, target.url);
+      return imageRow(target.url, target.alt, labels);
     case "footnote":
       return row(
         labels.footnote,
@@ -63,6 +59,33 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
     case "math":
       return mathRow(target.source, labels);
   }
+}
+
+/// Imagen incrustada. Se pinta primero la ruta y se sustituye por la imagen cuando llega,
+/// igual que las fórmulas: leer y codificar un archivo lleva su tiempo y un popover que
+/// aparece vacío se ve peor que uno que muestra algo desde el primer frame.
+///
+/// Si el render falla, la ruta se queda. Es el caso de una imagen remota (que a propósito no
+/// se descarga: posar el cursor no debe generar tráfico de red), de un documento sin guardar
+/// —no hay contra qué resolver una ruta relativa— o de un archivo que no está. En los tres la
+/// ruta es la información útil, así que no hace falta un mensaje aparte.
+function imageRow(url: string, alt: string, labels: InlineLabels): HTMLElement {
+  const wrap = row(labels.image, url);
+  const value = wrap.querySelector<HTMLElement>(".inline-preview-value")!;
+  void invoke<string>("render_image", { url })
+    .then((dataUri) => {
+      // <img> con data URI y NO innerHTML: un SVG incrustado así no ejecuta los scripts que
+      // pudiera traer dentro. Mismo criterio que la fórmula.
+      const img = document.createElement("img");
+      img.className = "inline-preview-image";
+      img.src = dataUri;
+      img.alt = alt || url;
+      value.replaceChildren(img);
+    })
+    .catch(() => {
+      /* queda la ruta, que ya dice dónde mirar */
+    });
+  return wrap;
 }
 
 /// Fórmula renderizada. Se pinta primero la fuente y se sustituye por el SVG cuando llega:

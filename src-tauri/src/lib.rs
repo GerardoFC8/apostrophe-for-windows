@@ -286,6 +286,63 @@ async fn render_math(
     ))
 }
 
+/// M19 (imagenes): lee la imagen de un `![alt](url)` y la devuelve como DATA URI, lista
+/// para el `<img>` del popover.
+///
+/// Mismo criterio que `render_math`: la imagen viaja INCRUSTADA y no como archivo. Asi el
+/// webview nunca necesita leer del disco y no hace falta habilitarle el protocolo de assets
+/// de Tauri, que le daria acceso al sistema de archivos.
+///
+/// Las remotas NO se descargan: posar el cursor no debe generar trafico de red (ver
+/// `apostrophe_core::image`). Los errores son diagnosticos, no copia de interfaz — el
+/// frontend los ignora y deja la ruta a la vista, que ya dice donde mirar.
+#[tauri::command]
+async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String, String> {
+    // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
+    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+    tauri::async_runtime::spawn_blocking(move || image_data_uri(&url, doc_dir.as_deref()))
+        .await
+        .map_err(|e| format!("error al leer la imagen: {e}"))?
+}
+
+/// Lee el archivo, lo valida y lo codifica. Aislado del comando porque es I/O bloqueante y
+/// corre en `spawn_blocking`.
+fn image_data_uri(url: &str, doc_dir: Option<&Path>) -> Result<String, String> {
+    use apostrophe_core::image::{resolve_image, sniff_format, ImageSource, MAX_IMAGE_BYTES};
+    use base64::Engine;
+
+    let (path, declared) = match resolve_image(url, doc_dir) {
+        ImageSource::Local { path, format } => (path, format),
+        ImageSource::Remote => return Err("las imagenes remotas no se incrustan".into()),
+        ImageSource::NoBaseDir => {
+            return Err("documento sin guardar: no hay directorio contra el que resolver".into())
+        }
+        ImageSource::Unsupported => return Err(format!("no es una imagen previsualizable: {url}")),
+    };
+
+    // El tamano se mira ANTES de leer: un archivo de cientos de megas no debe llegar a
+    // memoria solo para descubrir despues que no cabia en el popover.
+    let size = std::fs::metadata(&path)
+        .map_err(|e| format!("no se pudo abrir la imagen: {e}"))?
+        .len();
+    if size > MAX_IMAGE_BYTES {
+        return Err(format!("la imagen supera el tope de {MAX_IMAGE_BYTES} bytes"));
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| format!("no se pudo leer la imagen: {e}"))?;
+    // La extension es una promesa del documento, no un hecho. Lo que se incrusta en el
+    // webview tiene que ser de verdad el formato que dice ser.
+    if sniff_format(&bytes) != Some(declared) {
+        return Err(format!("el contenido no coincide con la extension: {}", path.display()));
+    }
+
+    Ok(format!(
+        "data:{};base64,{}",
+        declared.mime(),
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
 // state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
@@ -1305,6 +1362,7 @@ pub fn run() {
             align_table,
             inline_target,
             render_math,
+            render_image,
             count_stats,
             set_content,
             open_document,
