@@ -34,6 +34,10 @@ export interface Messages {
   "menu.language": string;
   "menu.recents": string;
   "menu.table": string;
+  "menu.insertImage": string;
+  /// Nombre del filtro del selector nativo de archivos. Viaja por IPC: el backend no
+  /// guarda copia, para que sumar un idioma no obligue a tocar Rust.
+  "dialog.imageFilter": string;
   "status.tableAligned": string;
   "status.notATable": string;
   "theme.open": string;
@@ -155,6 +159,8 @@ const ES: Messages = {
   "menu.language": "Idioma",
   "menu.recents": "Recientes",
   "menu.table": "Insertar tabla",
+  "menu.insertImage": "Insertar imagen",
+  "dialog.imageFilter": "Imágenes",
   "theme.open": "Tema",
   "theme.light": "Claro",
   "theme.dark": "Oscuro",
@@ -272,6 +278,8 @@ const EN: Messages = {
   "menu.language": "Language",
   "menu.recents": "Recent",
   "menu.table": "Insert table",
+  "menu.insertImage": "Insert image",
+  "dialog.imageFilter": "Images",
   "theme.open": "Theme",
   "theme.light": "Light",
   "theme.dark": "Dark",

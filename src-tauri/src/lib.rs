@@ -365,6 +365,47 @@ fn image_data_uri(url: &str, doc_dir: Option<&Path>) -> Result<String, String> {
     ))
 }
 
+/// Elige una imagen con el selector nativo y devuelve el fragmento `![](ruta)` listo para
+/// insertar. `None` si el usuario cancela.
+///
+/// La ruta sale RELATIVA al documento siempre que se pueda, porque es lo que mantiene el
+/// `.md` portable. Quien lo decide es el dominio (`image_markdown`); aca solo se abre el
+/// dialogo y se le pasa el directorio.
+///
+/// `filter_label` llega desde el frontend y no se escribe aca: la copia visible vive en el
+/// catalogo de i18n, asi sumar un idioma no obliga a tocar Rust.
+///
+/// `async` + `spawn_blocking` como todos los dialogos: sincrono correria INLINE en el main
+/// thread de WebView2, donde el picker se encola en el mismo hilo que lo bloquea -> deadlock.
+#[tauri::command]
+async fn pick_image(
+    app: tauri::AppHandle,
+    doc: tauri::State<'_, Doc>,
+    filter_label: String,
+) -> Result<Option<String>, String> {
+    // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
+    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+
+    let app2 = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app2.dialog()
+            .file()
+            .add_filter(&filter_label, &apostrophe_core::image::SUPPORTED_EXTENSIONS)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("error en el dialogo: {e}"))?;
+
+    let Some(file) = picked else {
+        return Ok(None); // el usuario cancelo el picker
+    };
+    let path = file.into_path().map_err(|e| format!("ruta invalida: {e}"))?;
+    Ok(Some(apostrophe_core::image::image_markdown(
+        &path,
+        doc_dir.as_deref(),
+    )))
+}
+
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
 // state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
@@ -1385,6 +1426,7 @@ pub fn run() {
             inline_target,
             render_math,
             render_image,
+            pick_image,
             count_stats,
             set_content,
             open_document,

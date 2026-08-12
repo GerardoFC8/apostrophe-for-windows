@@ -54,6 +54,13 @@
             <div id="table-grid" class="table-grid" role="group"></div>
             <div id="table-size" class="table-size">&nbsp;</div>
           </div>
+          <!-- Insertar imagen: abre el selector nativo y escribe `![](ruta)`. Sin atajo, la
+               misma convención que la tabla — insertar va por el menú, y los atajos quedan
+               para lo que transforma el texto que ya está escrito. -->
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item" id="menu-insert-image" type="button" role="menuitem">
+            <span data-i18n="menu.insertImage"></span>
+          </button>
           <!-- M15: selector de idioma. Los items los construye main.ts (buildLanguageMenu)
                reusando .theme-item, que ya trae el check del activo. Los nombres de idioma
                NO se traducen: cada uno va en su propio idioma, para que quien no entienda

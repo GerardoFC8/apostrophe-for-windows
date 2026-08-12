@@ -18,6 +18,12 @@ pub const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
 /// declaracion XML y algun comentario antes de la etiqueta raiz.
 const SVG_SNIFF_BYTES: usize = 1024;
 
+/// Extensiones que el selector de archivos ofrece al insertar una imagen.
+///
+/// Vive aca, y no en el adaptador, para que no se desincronice de `from_extension`: una
+/// lista mas larga dejaria elegir una imagen que despues no se puede mostrar.
+pub const SUPPORTED_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
+
 /// Formatos que el popover sabe incrustar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -126,6 +132,81 @@ pub fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
         return Some(ImageFormat::Svg);
     }
     None
+}
+
+/// Fragmento `![](ruta)` listo para insertar en el documento, con el `alt` vacio para que
+/// el cursor caiga ahi y se escriba de inmediato.
+pub fn image_markdown(target: &Path, doc_dir: Option<&Path>) -> String {
+    format!("![]({})", wrap_target(&markdown_path(target, doc_dir)))
+}
+
+/// Ruta con la que referirse a `target` desde un documento guardado en `doc_dir`.
+///
+/// Se prefiere la RELATIVA: es lo que mantiene el `.md` portable — mover la carpeta entera a
+/// otra maquina, o al lado de otro usuario, no rompe las imagenes. Se cae a la absoluta solo
+/// cuando no hay contra que resolver: documento sin guardar u otra unidad de Windows.
+///
+/// El separador que sale es siempre `/`, aunque en Windows la ruta venga con `\`. Es lo
+/// portable, la barra invertida en Markdown ademas es el caracter de escape, y Windows
+/// acepta las dos.
+pub fn markdown_path(target: &Path, doc_dir: Option<&Path>) -> String {
+    let target = normalize_separators(&target.to_string_lossy());
+    let Some(dir) = doc_dir else {
+        return target;
+    };
+    let dir = normalize_separators(&dir.to_string_lossy());
+
+    let dir_parts = path_parts(&dir);
+    let target_parts = path_parts(&target);
+
+    // Sin la misma raiz no hay ruta relativa posible: `C:` y `D:` no se alcanzan con `..`.
+    // Se comparan sin distinguir mayusculas porque las rutas de Windows no las distinguen.
+    match (dir_parts.first(), target_parts.first()) {
+        (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => {}
+        _ => return target,
+    }
+
+    let common = dir_parts
+        .iter()
+        .zip(target_parts.iter())
+        .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+        .count();
+
+    let mut parts: Vec<&str> = vec![".."; dir_parts.len() - common];
+    parts.extend(&target_parts[common..]);
+    if parts.is_empty() {
+        return target; // el destino ES el directorio: no hay nada relativo que escribir
+    }
+    parts.join("/")
+}
+
+/// Envuelve la ruta en `<>` cuando lleva espacios o parentesis, que de otro modo cortarian
+/// el `](...)` y dejarian el enlace roto.
+fn wrap_target(path: &str) -> String {
+    if path.contains([' ', '(', ')']) {
+        format!("<{path}>")
+    } else {
+        path.to_string()
+    }
+}
+
+fn normalize_separators(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// Componentes de una ruta ya normalizada. La primera entrada es la RAIZ: `""` en POSIX
+/// (por la barra inicial) o `"C:"` en Windows, y es lo que permite comparar unidades.
+fn path_parts(path: &str) -> Vec<&str> {
+    let trimmed = path.strip_suffix('/').unwrap_or(path);
+    let mut parts: Vec<&str> = trimmed.split('/').collect();
+    // Una ruta POSIX arranca con `/`, y el split deja un primer elemento vacio que ES la
+    // raiz. Los vacios de en medio (`//`) no lo son y solo estorban.
+    let head = parts.first().copied();
+    parts.retain(|p| !p.is_empty());
+    if head == Some("") {
+        parts.insert(0, "");
+    }
+    parts
 }
 
 /// Reemplaza el `src` de cada `<img>` del HTML por lo que devuelva `resolve`.
@@ -422,6 +503,127 @@ mod tests {
     fn una_firma_valida_pero_truncada_no_se_confunde() {
         assert_eq!(sniff_format(b"RIFF\x00\x00\x00\x00"), None); // RIFF sin el marcador WEBP
         assert_eq!(sniff_format(b"\x89PNG"), None);
+    }
+
+    #[test]
+    fn todo_lo_que_ofrece_el_selector_se_puede_mostrar() {
+        // Si las listas divergieran, el selector dejaria elegir una imagen que despues sale
+        // rota. Esta prueba es el unico lazo entre las dos.
+        for ext in SUPPORTED_EXTENSIONS {
+            assert!(
+                ImageFormat::from_extension(ext).is_some(),
+                "el selector ofrece {ext} pero no se sabe mostrar"
+            );
+        }
+    }
+
+    #[test]
+    fn una_imagen_junto_al_documento_se_escribe_relativa() {
+        // Lo relativo es lo que mantiene el .md portable: mover la carpeta no lo rompe.
+        assert_eq!(markdown_path(Path::new("/home/ana/notas/gato.png"), Some(&dir())), "gato.png");
+    }
+
+    #[test]
+    fn una_imagen_en_una_subcarpeta_conserva_el_tramo() {
+        assert_eq!(
+            markdown_path(Path::new("/home/ana/notas/img/gato.png"), Some(&dir())),
+            "img/gato.png"
+        );
+    }
+
+    #[test]
+    fn una_imagen_fuera_del_documento_sube_con_dos_puntos() {
+        assert_eq!(
+            markdown_path(Path::new("/home/ana/fotos/gato.png"), Some(&dir())),
+            "../fotos/gato.png"
+        );
+    }
+
+    #[test]
+    fn sin_documento_guardado_se_escribe_la_ruta_absoluta() {
+        // No hay contra que resolver. La absoluta funciona; la relativa seria una mentira.
+        assert_eq!(
+            markdown_path(Path::new("/home/ana/fotos/gato.png"), None),
+            "/home/ana/fotos/gato.png"
+        );
+    }
+
+    #[test]
+    fn otra_unidad_de_windows_obliga_a_la_absoluta() {
+        // `C:` y `D:` no se alcanzan con `..`, por muchos que se pongan.
+        let doc = PathBuf::from(r"C:\Users\ana\notas");
+        assert_eq!(
+            markdown_path(Path::new(r"D:\fotos\gato.png"), Some(&doc)),
+            "D:/fotos/gato.png"
+        );
+    }
+
+    #[test]
+    fn en_la_misma_unidad_de_windows_si_hay_relativa() {
+        let doc = PathBuf::from(r"C:\Users\ana\Documents\notas");
+        assert_eq!(
+            markdown_path(Path::new(r"C:\Users\ana\Pictures\gato.png"), Some(&doc)),
+            "../../Pictures/gato.png"
+        );
+    }
+
+    #[test]
+    fn las_barras_invertidas_salen_siempre_como_barras() {
+        // En Markdown la barra invertida es el caracter de escape; Windows acepta las dos.
+        assert_eq!(
+            markdown_path(Path::new(r"C:\fotos\gato.png"), None),
+            "C:/fotos/gato.png"
+        );
+    }
+
+    #[test]
+    fn las_mayusculas_no_impiden_la_ruta_relativa_en_windows() {
+        // Las rutas de Windows no distinguen mayusculas: si se compararan tal cual, el
+        // picker devolviendo otra capitalizacion daria una absoluta innecesaria.
+        let doc = PathBuf::from(r"C:\Users\Ana\Notas");
+        assert_eq!(
+            markdown_path(Path::new(r"c:\users\ana\notas\gato.png"), Some(&doc)),
+            "gato.png"
+        );
+    }
+
+    #[test]
+    fn el_fragmento_deja_el_alt_vacio_para_que_el_cursor_caiga_ahi() {
+        assert_eq!(
+            image_markdown(Path::new("/home/ana/notas/gato.png"), Some(&dir())),
+            "![](gato.png)"
+        );
+    }
+
+    #[test]
+    fn una_ruta_con_espacios_se_envuelve_en_angulos() {
+        // Sin los angulos el `](...)` se corta y el enlace queda roto.
+        assert_eq!(
+            image_markdown(Path::new("/home/ana/notas/mi gato.png"), Some(&dir())),
+            "![](<mi gato.png>)"
+        );
+    }
+
+    #[test]
+    fn una_ruta_con_parentesis_tambien_se_envuelve() {
+        assert_eq!(
+            image_markdown(Path::new("/home/ana/notas/gato (1).png"), Some(&dir())),
+            "![](<gato (1).png>)"
+        );
+    }
+
+    #[test]
+    fn lo_que_se_inserta_se_puede_volver_a_resolver() {
+        // Cierra el circulo: lo que escribe el insertador tiene que entenderlo el popover.
+        let md = image_markdown(Path::new("/home/ana/notas/mi gato.png"), Some(&dir()));
+        let url = md.trim_start_matches("![](").trim_end_matches(')');
+        assert_eq!(
+            resolve_image(url, Some(&dir())),
+            ImageSource::Local {
+                path: PathBuf::from("/home/ana/notas/mi gato.png"),
+                format: ImageFormat::Png,
+            }
+        );
     }
 
     /// Resolutor de mentira para las pruebas del reescritor: incrusta todo lo que no sea

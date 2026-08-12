@@ -378,6 +378,30 @@ async function insertTable(rows: number, cols: number): Promise<void> {
   }
 }
 
+// Elige una imagen con el selector nativo e inserta `![](ruta)` en el cursor.
+//
+// La ruta la arma Rust con el dominio: relativa al documento siempre que se pueda, para que
+// el `.md` siga siendo portable. Aquí solo se coloca el texto y se deja el cursor entre los
+// corchetes del alt, que es lo primero que conviene escribir.
+async function insertImage(): Promise<void> {
+  try {
+    const snippet = await invoke<string | null>("pick_image", {
+      filterLabel: t("dialog.imageFilter"),
+    });
+    if (!snippet) return; // el usuario canceló el selector
+    const sel = view.state.selection.main;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: snippet },
+      // Entre `![` y `](`: el alt va vacío justamente para caer acá.
+      selection: { anchor: sel.from + 2 },
+      scrollIntoView: true,
+    });
+    view.focus();
+  } catch (err) {
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+  }
+}
+
 // Realinea la tabla sobre la que está el cursor. El bloque se delimita por renglones en
 // blanco; el dominio decide si eso es o no una tabla y devuelve null cuando no lo es, así
 // que nunca se reescribe algo que no entendimos.
@@ -696,6 +720,10 @@ function trapTab(e: KeyboardEvent): boolean {
 // Items del menú.
 document.querySelector<HTMLButtonElement>("#menu-shortcuts")?.addEventListener("click", openShortcuts);
 document.querySelector<HTMLButtonElement>("#menu-about")?.addEventListener("click", openAbout);
+document.querySelector<HTMLButtonElement>("#menu-insert-image")?.addEventListener("click", () => {
+  closeAppMenu(); // el selector es una ventana nativa: el menú abierto detrás estorba
+  void insertImage();
+});
 
 // Cierre de los overlays: botón × y clic en el BACKDROP (no en el panel). El backdrop y el
 // panel son HERMANOS dentro de .overlay (no el panel hijo del backdrop), así que un clic en
