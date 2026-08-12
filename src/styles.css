@@ -940,6 +940,16 @@ kbd {
   max-height: 8em;
 }
 
+/* Motivo por el que una imagen no se pudo mostrar. Va bajo la ruta, atenuado: es una
+   explicación, no una alarma. Sin `nowrap` — a diferencia de la ruta, la frase debe leerse
+   entera aunque ocupe dos renglones. */
+.inline-preview-note {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  white-space: normal;
+}
+
 /* M19: imagen incrustada en el popover. El tope de alto evita que una foto grande tape el
    texto que se está escribiendo; el `object-fit` conserva la proporción al reducirla. */
 .inline-preview-image {

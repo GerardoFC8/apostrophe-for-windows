@@ -315,51 +315,52 @@ async fn render_math(
 /// de Tauri, que le daria acceso al sistema de archivos.
 ///
 /// Las remotas NO se descargan: posar el cursor no debe generar trafico de red (ver
-/// `apostrophe_core::image`). Los errores son diagnosticos, no copia de interfaz — el
-/// frontend los ignora y deja la ruta a la vista, que ya dice donde mirar.
+/// `apostrophe_core::image`).
+///
+/// El error es un CODIGO estable (`remote`, `not-found`, …), no una frase: la copia visible
+/// vive en el catalogo de i18n del frontend, que es quien sabe en que idioma esta la app.
 #[tauri::command]
 async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
     let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
     tauri::async_runtime::spawn_blocking(move || image_data_uri(&url, doc_dir.as_deref()))
         .await
-        .map_err(|e| format!("error al leer la imagen: {e}"))?
+        .map_err(|_| "unreadable".to_string())?
 }
 
 /// Lee el archivo, lo valida y lo codifica. Aislado del comando porque es I/O bloqueante y
 /// corre en `spawn_blocking`.
+///
+/// El formato con el que se incrusta lo decide el CONTENIDO, no la extension. La extension
+/// solo filtra que archivos vale la pena abrir; mandarla a decidir el MIME rechazaria una
+/// imagen perfectamente valida por tener el nombre cambiado — un `.png` que en realidad es
+/// WebP es de lo mas comun en material descargado, y los navegadores lo muestran sin
+/// chistar porque miran los bytes. La garantia que importa se mantiene: solo se incrusta lo
+/// que `sniff_format` reconoce como una imagen soportada.
 fn image_data_uri(url: &str, doc_dir: Option<&Path>) -> Result<String, String> {
     use apostrophe_core::image::{resolve_image, sniff_format, ImageSource, MAX_IMAGE_BYTES};
     use base64::Engine;
 
-    let (path, declared) = match resolve_image(url, doc_dir) {
-        ImageSource::Local { path, format } => (path, format),
-        ImageSource::Remote => return Err("las imagenes remotas no se incrustan".into()),
-        ImageSource::NoBaseDir => {
-            return Err("documento sin guardar: no hay directorio contra el que resolver".into())
-        }
-        ImageSource::Unsupported => return Err(format!("no es una imagen previsualizable: {url}")),
+    let path = match resolve_image(url, doc_dir) {
+        ImageSource::Local { path, .. } => path,
+        ImageSource::Remote => return Err("remote".into()),
+        ImageSource::NoBaseDir => return Err("no-base-dir".into()),
+        ImageSource::Unsupported => return Err("unsupported".into()),
     };
 
     // El tamano se mira ANTES de leer: un archivo de cientos de megas no debe llegar a
     // memoria solo para descubrir despues que no cabia en el popover.
-    let size = std::fs::metadata(&path)
-        .map_err(|e| format!("no se pudo abrir la imagen: {e}"))?
-        .len();
+    let size = std::fs::metadata(&path).map_err(|_| "not-found")?.len();
     if size > MAX_IMAGE_BYTES {
-        return Err(format!("la imagen supera el tope de {MAX_IMAGE_BYTES} bytes"));
+        return Err("too-large".into());
     }
 
-    let bytes = std::fs::read(&path).map_err(|e| format!("no se pudo leer la imagen: {e}"))?;
-    // La extension es una promesa del documento, no un hecho. Lo que se incrusta en el
-    // webview tiene que ser de verdad el formato que dice ser.
-    if sniff_format(&bytes) != Some(declared) {
-        return Err(format!("el contenido no coincide con la extension: {}", path.display()));
-    }
+    let bytes = std::fs::read(&path).map_err(|_| "unreadable")?;
+    let format = sniff_format(&bytes).ok_or("unsupported")?;
 
     Ok(format!(
         "data:{};base64,{}",
-        declared.mime(),
+        format.mime(),
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
 }

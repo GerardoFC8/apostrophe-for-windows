@@ -1352,6 +1352,14 @@ const view = new EditorView({
       mathColor: getComputedStyle(document.documentElement)
         .getPropertyValue("--editor-fg")
         .trim(),
+      imageProblem: {
+        remote: t("inline.imageRemote"),
+        "no-base-dir": t("inline.imageNoBaseDir"),
+        "not-found": t("inline.imageNotFound"),
+        "too-large": t("inline.imageTooLarge"),
+        unsupported: t("inline.imageUnsupported"),
+        unreadable: t("inline.imageUnreadable"),
+      },
     })),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleUpdate();

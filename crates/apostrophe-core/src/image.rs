@@ -394,6 +394,22 @@ mod tests {
     }
 
     #[test]
+    fn un_png_que_en_realidad_es_webp_se_puede_mostrar_igual() {
+        // Caso real: una foto de perfil descargada, guardada como `.png` pero WebP por
+        // dentro. La extension solo filtra que archivos vale la pena abrir; quien decide
+        // con que MIME se incrusta es el CONTENIDO. Exigir que coincidan rechazaria una
+        // imagen que la app sabe mostrar perfectamente — los navegadores tampoco miran el
+        // nombre, miran los bytes.
+        let ImageSource::Local { format, .. } = resolve_image("pfp.png", Some(&dir())) else {
+            panic!("el nombre pasa el filtro de extension");
+        };
+        assert_eq!(format, ImageFormat::Png, "la extension promete PNG");
+
+        let bytes = b"RIFF\x00\x00\x00\x00WEBPVP8 resto";
+        assert_eq!(sniff_format(bytes), Some(ImageFormat::Webp), "pero el contenido manda");
+    }
+
+    #[test]
     fn un_archivo_que_no_es_imagen_no_pasa_la_firma() {
         // El caso que importa: algo llamado `foto.png` que en realidad es otra cosa. La
         // extension sola no alcanza para decidir que se incrusta en el webview.

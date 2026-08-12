@@ -48,6 +48,13 @@ export interface Messages {
   "view.detach": string;
   "inline.link": string;
   "inline.image": string;
+  /// Motivos por los que una imagen no se puede mostrar en el popover.
+  "inline.imageRemote": string;
+  "inline.imageNoBaseDir": string;
+  "inline.imageNotFound": string;
+  "inline.imageTooLarge": string;
+  "inline.imageUnsupported": string;
+  "inline.imageUnreadable": string;
   "inline.footnote": string;
   "inline.footnoteMissing": string;
   "inline.math": string;
@@ -160,6 +167,12 @@ const ES: Messages = {
   "view.detach": "Vista previa en otra ventana",
   "inline.link": "Enlace",
   "inline.image": "Imagen",
+  "inline.imageRemote": "Las imágenes remotas no se descargan.",
+  "inline.imageNoBaseDir": "Guarda el documento para poder usar rutas relativas.",
+  "inline.imageNotFound": "No se encontró el archivo.",
+  "inline.imageTooLarge": "La imagen supera los 5 MB.",
+  "inline.imageUnsupported": "El archivo no es una imagen PNG, JPEG, GIF, WebP ni SVG.",
+  "inline.imageUnreadable": "No se pudo leer el archivo.",
   "inline.footnote": "Nota al pie",
   "inline.footnoteMissing": "sin definir",
   "inline.math": "Fórmula",
@@ -271,6 +284,12 @@ const EN: Messages = {
   "view.detach": "Preview in a separate window",
   "inline.link": "Link",
   "inline.image": "Image",
+  "inline.imageRemote": "Remote images are not downloaded.",
+  "inline.imageNoBaseDir": "Save the document to use relative paths.",
+  "inline.imageNotFound": "File not found.",
+  "inline.imageTooLarge": "The image is larger than 5 MB.",
+  "inline.imageUnsupported": "The file is not a PNG, JPEG, GIF, WebP or SVG image.",
+  "inline.imageUnreadable": "The file could not be read.",
   "inline.footnote": "Footnote",
   "inline.footnoteMissing": "not defined",
   "inline.math": "Formula",

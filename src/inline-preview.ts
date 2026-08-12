@@ -30,7 +30,19 @@ export interface InlineLabels {
   /// Color con el que se dibuja la fórmula. Sale de la paleta del tema activo: typst pinta
   /// en negro por defecto, que en tema oscuro sería una fórmula invisible.
   mathColor: string;
+  /// Por qué no se pudo mostrar una imagen, por código. Rust manda el código y main.ts lo
+  /// traduce: la ruta sola dice DÓNDE mirar, no QUÉ está mal.
+  imageProblem: Record<ImageProblem, string>;
 }
+
+/// Códigos que devuelve `render_image` cuando no puede incrustar la imagen.
+export type ImageProblem =
+  | "remote"
+  | "no-base-dir"
+  | "not-found"
+  | "too-large"
+  | "unsupported"
+  | "unreadable";
 
 function row(label: string, value: string): HTMLElement {
   const wrap = document.createElement("div");
@@ -65,10 +77,9 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
 /// igual que las fórmulas: leer y codificar un archivo lleva su tiempo y un popover que
 /// aparece vacío se ve peor que uno que muestra algo desde el primer frame.
 ///
-/// Si el render falla, la ruta se queda. Es el caso de una imagen remota (que a propósito no
-/// se descarga: posar el cursor no debe generar tráfico de red), de un documento sin guardar
-/// —no hay contra qué resolver una ruta relativa— o de un archivo que no está. En los tres la
-/// ruta es la información útil, así que no hace falta un mensaje aparte.
+/// Si el render falla, debajo de la ruta se explica POR QUÉ: remota a propósito, documento
+/// sin guardar, archivo ausente, demasiado grande o no reconocible como imagen. La ruta sola
+/// dice dónde mirar pero no qué está mal, y sin el motivo la app parece rota sin explicación.
 function imageRow(url: string, alt: string, labels: InlineLabels): HTMLElement {
   const wrap = row(labels.image, url);
   const value = wrap.querySelector<HTMLElement>(".inline-preview-value")!;
@@ -82,8 +93,13 @@ function imageRow(url: string, alt: string, labels: InlineLabels): HTMLElement {
       img.alt = alt || url;
       value.replaceChildren(img);
     })
-    .catch(() => {
-      /* queda la ruta, que ya dice dónde mirar */
+    .catch((err) => {
+      const reason = labels.imageProblem[String(err) as ImageProblem];
+      if (!reason) return; // código desconocido: mejor callar que mostrar una clave suelta
+      const note = document.createElement("div");
+      note.className = "inline-preview-note";
+      note.textContent = reason;
+      wrap.append(note);
     });
   return wrap;
 }
