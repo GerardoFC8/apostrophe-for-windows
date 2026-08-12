@@ -219,11 +219,27 @@ pub struct ExportOptions<'a> {
     /// ya viaja dentro de la hoja de estilos. Sale de la misma var `--accent` del tema,
     /// para no tener dos fuentes de verdad del color de acento.
     pub link_color: Option<&'a str>,
+    /// Directorio donde vive el documento, contra el que se resuelven las rutas RELATIVAS
+    /// de sus imagenes. A diferencia del resto de las opciones, la usan TODOS los formatos.
+    ///
+    /// Hace falta porque el markdown no se le pasa a pandoc desde su carpeta real: el
+    /// adaptador lo escribe en un temporal del sistema, y desde ahi `![](gato.png)` no
+    /// resuelve contra nada. Sin esto pandoc no encuentra la imagen y NO falla — avisa por
+    /// stderr y sigue: en HTML deja el `src` roto y en DOCX/ODT/EPUB/PDF reemplaza la
+    /// imagen por su texto alternativo, o sea que desaparece del archivo exportado.
+    ///
+    /// `None` mientras el documento no se haya guardado nunca: no hay carpeta contra la
+    /// cual resolver, igual que `ImageSource::NoBaseDir` en el popover.
+    pub resource_path: Option<&'a str>,
 }
 
 /// Construye los args de pandoc para EXPORTAR a `output_path` en `format`:
-/// `--from markdown --to <fmt> <flags del formato> --output <path>`. El input
-/// (la ruta del temporal con el markdown) lo antepone el adaptador, igual que el preview.
+/// `--from markdown --to <fmt> [--resource-path=<dir>] <flags del formato> --output <path>`.
+/// El input (la ruta del temporal con el markdown) lo antepone el adaptador, igual que el
+/// preview.
+///
+/// `--resource-path` va aca y no en `format_args` porque no es una decision de formato:
+/// dice desde donde se resuelven las rutas relativas, y eso vale para los seis por igual.
 pub fn export_args(format: ExportFormat, output_path: &str, opts: &ExportOptions) -> Vec<String> {
     let mut args = vec![
         "--from".to_string(),
@@ -231,6 +247,9 @@ pub fn export_args(format: ExportFormat, output_path: &str, opts: &ExportOptions
         "--to".to_string(),
         format.pandoc_to().to_string(),
     ];
+    if let Some(dir) = opts.resource_path {
+        args.push(format!("--resource-path={dir}"));
+    }
     args.extend(format.format_args(opts));
     args.push("--output".to_string());
     args.push(output_path.to_string());
@@ -357,6 +376,50 @@ mod tests {
         // en una ruta local del sistema y la exportacion falle en Windows. Ver format_args.
         let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
         assert!(!args.iter().any(|a| a.contains("embed-resources")));
+    }
+
+    #[test]
+    fn el_directorio_del_documento_viaja_en_todos_los_formatos() {
+        // A diferencia del motor PDF o la hoja de estilos, esta opcion NO es de un formato:
+        // sin ella pandoc no encuentra `![](gato.png)` y la imagen se pierde en los seis.
+        for format in ExportFormat::ALL {
+            let args = export_args(
+                format,
+                "/tmp/out",
+                &ExportOptions {
+                    resource_path: Some("/home/ana/notas"),
+                    ..Default::default()
+                },
+            );
+            assert!(
+                args.contains(&"--resource-path=/home/ana/notas".to_string()),
+                "{format:?} exporta sin saber donde vive el documento"
+            );
+        }
+    }
+
+    #[test]
+    fn sin_documento_guardado_no_hay_resource_path() {
+        // Documento nunca guardado: no hay carpeta contra la cual resolver. Pasar el flag
+        // vacio haria que pandoc resolviera contra el directorio actual, que es cualquiera.
+        for format in ExportFormat::ALL {
+            let args = export_args(format, "/tmp/out", &ExportOptions::default());
+            assert!(!args.iter().any(|a| a.starts_with("--resource-path")));
+        }
+    }
+
+    #[test]
+    fn el_directorio_del_documento_admite_espacios() {
+        // Mismo caso que el motor PDF: "PROYECTOS DEMO" viaja como UN argumento.
+        let args = export_args(
+            ExportFormat::Docx,
+            "/tmp/out.docx",
+            &ExportOptions {
+                resource_path: Some(r"C:\PROYECTOS DEMO\notas"),
+                ..Default::default()
+            },
+        );
+        assert!(args.contains(&r"--resource-path=C:\PROYECTOS DEMO\notas".to_string()));
     }
 
     #[test]

@@ -958,11 +958,16 @@ async fn save_document_as(
 #[tauri::command]
 async fn export_document(
     app: tauri::AppHandle,
+    doc: tauri::State<'_, Doc>,
     text: String,
     css: String,
     accent: String,
 ) -> Result<Option<String>, String> {
     use apostrophe_core::convert::{export_args, ExportFormat, ExportOptions};
+
+    // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
+    // Es lo que despues resuelve las rutas relativas de las imagenes (--resource-path).
+    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -1042,10 +1047,16 @@ async fn export_document(
     };
     let header_str = header.as_ref().map(|p| p.to_string_lossy().into_owned());
 
+    // Sin esto pandoc busca `![](gato.png)` contra su directorio actual —no contra el del
+    // documento— y no la encuentra. No falla: avisa por stderr y sigue, dejando el `src`
+    // roto en HTML y la imagen FUERA del DOCX, ODT, EPUB o PDF.
+    let resource_path = doc_dir.as_ref().map(|d| d.to_string_lossy().into_owned());
+
     let opts = ExportOptions {
         pdf_engine: pdf_engine.as_deref(),
         header_include: header_str.as_deref(),
         link_color: (!accent.is_empty()).then_some(accent.as_str()),
+        resource_path: resource_path.as_deref(),
     };
     let mut args = vec![tmp.to_string_lossy().into_owned()];
     args.extend(export_args(format, &out_str, &opts));
