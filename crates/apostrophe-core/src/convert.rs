@@ -372,8 +372,13 @@ mod tests {
 
     #[test]
     fn html_nunca_incrusta_recursos() {
-        // Regresion: --embed-resources junto a --mathjax hace que pandoc busque MathJax
-        // en una ruta local del sistema y la exportacion falle en Windows. Ver format_args.
+        // Regresion: `--embed-resources` no se limita a las imagenes, tambien absorbe el
+        // bundle de MathJax que enlaza `--mathjax`. Eso obliga a tener red en el momento de
+        // exportar y engorda el archivo — medido con el pandoc del sidecar (3.9.0.2), una
+        // sola formula lleva el HTML de 3,9 KB a 1,3 MB.
+        //
+        // Las imagenes del HTML se incrustan en el adaptador con el mismo camino que el
+        // preview (`rewrite_img_srcs`), que toca solo los `<img>`. Ver `embed_html_images`.
         let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
         assert!(!args.iter().any(|a| a.contains("embed-resources")));
     }

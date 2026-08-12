@@ -1066,7 +1066,42 @@ async fn export_document(
     if let Some(path) = header {
         let _ = std::fs::remove_file(path);
     }
-    result.map(|_| Some(out_str)) // pandoc escribe en --output; su stdout queda vacio
+    result?; // pandoc escribe en --output; su stdout queda vacio
+
+    // El HTML se termina de armar aca. Los demas formatos ya incrustan la imagen dentro del
+    // archivo, pero el HTML conserva el `src` relativo, que solo funciona si el export cae
+    // justo al lado de la imagen — compartir el .html suelto lo rompe.
+    if format == ExportFormat::Html {
+        embed_html_images(&out_path, doc_dir).await?;
+    }
+    Ok(Some(out_str))
+}
+
+/// Reescribe el HTML ya exportado incrustando cada imagen local como data URI.
+///
+/// Es el MISMO camino que el preview (`rewrite_img_srcs` + `image_data_uri`), y no
+/// `--embed-resources` de pandoc, a proposito: ese flag tambien se traga el bundle de
+/// MathJax, lo que obliga a tener red en el momento de exportar y engorda el archivo de
+/// unos pocos KB a mas de un mega. Aca solo viajan las imagenes; las formulas se siguen
+/// resolviendo con el script de MathJax, igual que antes. Ver `html_nunca_incrusta_recursos`.
+///
+/// Lo que no se pueda incrustar —remota, ausente o por encima del tope— conserva su `src`
+/// original: una imagen rota en el export es mejor que un export que falla entero.
+///
+/// Leer y codificar cada imagen es I/O bloqueante: va fuera del hilo de eventos.
+async fn embed_html_images(path: &Path, doc_dir: Option<PathBuf>) -> Result<(), String> {
+    let path = path.to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        let html = std::fs::read_to_string(&path)
+            .map_err(|e| format!("no se pudo releer el HTML exportado: {e}"))?;
+        let embedded = apostrophe_core::image::rewrite_img_srcs(&html, |src| {
+            image_data_uri(src, doc_dir.as_deref()).ok()
+        });
+        std::fs::write(&path, embedded)
+            .map_err(|e| format!("no se pudo escribir el HTML exportado: {e}"))
+    })
+    .await
+    .map_err(|e| format!("error al incrustar las imagenes del export: {e}"))?
 }
 
 // --- M6: spellcheck ---
