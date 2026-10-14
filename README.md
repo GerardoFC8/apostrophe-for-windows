@@ -18,6 +18,29 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
   (pandoc y typst): no necesitas instalar nada más.
 - Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
 
+## Instalación
+
+La forma más sencilla es con [winget](https://learn.microsoft.com/windows/package-manager/winget/),
+el gestor de paquetes que ya viene en Windows 10 y 11. Desde PowerShell o la terminal:
+
+```powershell
+winget install GerardoFC8.ApostropheForWindows
+```
+
+No pide permisos de administrador: la app se instala solo para tu usuario.
+
+Para actualizar o desinstalar:
+
+```powershell
+winget upgrade GerardoFC8.ApostropheForWindows
+winget uninstall GerardoFC8.ApostropheForWindows
+```
+
+> La versión de winget puede tardar unos días en alcanzar a la última release. Si
+> quieres la más reciente, descarga `Apostrophe_<versión>_x64-setup.exe` desde
+> [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) y ejecútalo
+> (ver ["Windows protegió tu PC"](#windows-protegió-tu-pc--es-normal)).
+
 ## Requisitos de desarrollo
 
 - [Rust](https://rustup.rs/) (toolchain MSVC en Windows: `x86_64-pc-windows-msvc`).
