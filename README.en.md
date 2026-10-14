@@ -21,6 +21,29 @@ with **Tauri 2 + Rust** on a hexagonal architecture
   everything: nothing else to install.
 - Spanish spell checking (Hunspell via `spellbook`, pure Rust).
 
+## Installation
+
+The easiest way is with [winget](https://learn.microsoft.com/windows/package-manager/winget/),
+the package manager that ships with Windows 10 and 11. From PowerShell or the terminal:
+
+```powershell
+winget install GerardoFC8.ApostropheForWindows
+```
+
+No administrator rights needed: the app is installed for your user only.
+
+To upgrade or uninstall:
+
+```powershell
+winget upgrade GerardoFC8.ApostropheForWindows
+winget uninstall GerardoFC8.ApostropheForWindows
+```
+
+> The winget version may take a few days to catch up with the latest release. For the
+> newest one, download `Apostrophe_<version>_x64-setup.exe` from
+> [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) and run it
+> (see ["Windows protected your PC"](#windows-protected-your-pc--this-is-normal)).
+
 ## Development requirements
 
 - [Rust](https://rustup.rs/) (MSVC toolchain on Windows: `x86_64-pc-windows-msvc`).
