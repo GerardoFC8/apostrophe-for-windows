@@ -514,6 +514,11 @@ fn rewatch_doc(app: &tauri::AppHandle, docs: &Docs, id: DocId) {
                 suppress_watcher(app, id);
                 return;
             }
+            // Si el documento se cerro mientras se armaba, el watcher sobra: se suelta
+            // aca y no queda emitiendo eventos de un documento que ya no existe.
+            if !docs.lock().unwrap().contains(id) {
+                return;
+            }
             app.state::<FileWatchers>()
                 .0
                 .lock()
@@ -913,14 +918,19 @@ async fn new_document(
     new_tab: Option<bool>,
     docs: tauri::State<'_, Docs>,
 ) -> Result<Option<DocStatus>, String> {
-    let target = target_doc(&docs, doc_id)?;
-    sync_text(&docs, target, text);
-
     if new_tab.unwrap_or(false) {
+        // Sin crear nada de mas: si no queda ningun documento, el unico nuevo es este.
+        let current = docs.lock().unwrap().resolve(doc_id);
+        if let Some(current) = current {
+            sync_text(&docs, current, text);
+        }
         let mut ws = docs.lock().unwrap();
         let id = ws.create_untitled();
         return doc_status(&ws, id).map(Some);
     }
+
+    let target = target_doc(&docs, doc_id)?;
+    sync_text(&docs, target, text);
 
     if !confirm_discard_if_dirty(&app, &docs, target, labels).await? {
         return Ok(None);
