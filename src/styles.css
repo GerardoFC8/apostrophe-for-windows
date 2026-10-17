@@ -407,6 +407,133 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ====== Pestañas ==========================================================
+   Banda entre la titlebar y el editor, con las CSS vars del tema (claro/oscuro/sepia).
+   La activa se marca con fondo + subrayado de acento; el ● de cambios sin guardar es el
+   mismo de la titlebar. Si no entran, la lista scrollea en horizontal (la rueda también,
+   ver tab-bar.ts) y el botón + queda siempre visible a la derecha. */
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  user-select: none;
+}
+
+.tab-list {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 220px;
+  border-right: 1px solid var(--border);
+}
+
+.tab.is-active {
+  background: var(--hover);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.3rem 0 0.75rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  opacity: 0.75;
+  cursor: default;
+}
+
+.tab.is-active .tab-btn,
+.tab:hover .tab-btn {
+  opacity: 1;
+}
+
+.tab-btn:focus-visible,
+.tab-close:focus-visible,
+.tab-new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-dirty {
+  display: none;
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+.tab.is-dirty .tab-dirty {
+  display: inline;
+}
+
+/* La × se ve en la activa y al pasar el mouse: con muchas pestañas, una × en cada una
+   satura la barra. Sigue siendo clicable (y accesible por su aria-label) siempre. */
+.tab-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-right: 0.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  cursor: default;
+}
+
+.tab.is-active .tab-close,
+.tab:hover .tab-close,
+.tab-close:focus-visible {
+  opacity: 0.7;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
+.tab-new {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: default;
+}
+
+.tab-new:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+/* ====================================================================== */
+
 /* M8.4b: infobar de cambio externo. Banda horizontal entre la titlebar y el editor;
    NO modal, el editor sigue activo. Se muestra solo cuando isDirty y el archivo cambia
    en disco. Reutiliza --border, --hover y --chrome-fg del tema activo. */
@@ -584,13 +711,16 @@ body.focus-mode .cm-content {
    un hijo no puede "des-atenuarse"; por eso atenuamos los hijos de la titlebar uno a uno,
    excluyendo #status, en vez de la titlebar entera. */
 body.focus-mode .titlebar > *:not(#status),
+body.focus-mode .tab-bar,
 body.focus-mode .statusbar {
   opacity: 0.25;
   transition: opacity 150ms ease;
 }
 body.focus-mode .titlebar:hover > *:not(#status),
+body.focus-mode .tab-bar:hover,
+body.focus-mode .tab-bar:focus-within,
 body.focus-mode .statusbar:hover {
-  opacity: 1; /* escape: mover/cerrar la ventana, ver las stats */
+  opacity: 1; /* escape: mover/cerrar la ventana, cambiar de pestaña, ver las stats */
 }
 /* La línea activa no debe competir con el atenuado del párrafo. */
 body.focus-mode .cm-activeLine {
@@ -599,11 +729,13 @@ body.focus-mode .cm-activeLine {
 
 /* --- M9.3: pantalla completa (F11) --- */
 /* Oculta el chrome custom para inmersión total (paridad: el upstream oculta headerbar +
-   bottombar). El editor crece solo (body es flex-column y .split es flex:1). El
+   bottombar; aquí también la barra de pestañas). El editor crece solo (body es
+   flex-column y .split es flex:1). El
    external-change-bar NUNCA se oculta: es un aviso de posible pérdida de datos. */
 body.is-fullscreen .titlebar,
+body.is-fullscreen .tab-bar,
 body.is-fullscreen .statusbar {
-  display: none;
+  display: none; /* las pestañas siguen accesibles con Ctrl+Tab / Ctrl+W / Ctrl+T */
 }
 /* Reveal-on-hover del borde superior: la titlebar reaparece como overlay (sin reflujo del
    editor) mientras el mouse esté arriba, para mover/cerrar la ventana (paridad con el

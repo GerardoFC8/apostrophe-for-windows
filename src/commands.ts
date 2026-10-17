@@ -1,8 +1,10 @@
 // Comandos de la app que actuan sobre el texto del editor apoyandose en el nucleo Rust:
 // tablas (M17), imagenes y exportacion (M12). No conocen al documento (nombre, dirty):
-// solo leen y escriben el texto de la vista.
+// solo leen y escriben el texto de la vista. Lo unico que toman de la pestaña activa es su
+// docId, para que el backend use la carpeta de ESE documento (rutas de imagen, exportar).
 import { invoke } from "@tauri-apps/api/core";
 import { view, getText } from "./editor";
+import { activeDocId } from "./tabs";
 import { exportTheme } from "./preview";
 import { flashStatus, showStatus } from "./status";
 import { t } from "./i18n";
@@ -43,6 +45,7 @@ export async function insertImage(): Promise<void> {
   try {
     const snippet = await invoke<string | null>("pick_image", {
       filterLabel: t("dialog.imageFilter"),
+      docId: activeDocId(),
     });
     if (!snippet) return; // el usuario canceló el selector
     const sel = view.state.selection.main;
@@ -99,6 +102,7 @@ export async function exportDoc(): Promise<void> {
       text: getText(),
       css,
       accent,
+      docId: activeDocId(),
     });
     if (out) flashStatus(t("status.exported"));
     else showStatus(""); // cancelado

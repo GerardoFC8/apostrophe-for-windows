@@ -57,12 +57,12 @@ function row(label: string, value: string): HTMLElement {
   return wrap;
 }
 
-function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
+function render(target: InlineTarget, labels: InlineLabels, docId: number | undefined): HTMLElement {
   switch (target.kind) {
     case "link":
       return row(labels.link, target.url);
     case "image":
-      return imageRow(target.url, target.alt, labels);
+      return imageRow(target.url, target.alt, labels, docId);
     case "footnote":
       return row(
         labels.footnote,
@@ -80,10 +80,18 @@ function render(target: InlineTarget, labels: InlineLabels): HTMLElement {
 /// Si el render falla, debajo de la ruta se explica POR QUÉ: remota a propósito, documento
 /// sin guardar, archivo ausente, demasiado grande o no reconocible como imagen. La ruta sola
 /// dice dónde mirar pero no qué está mal, y sin el motivo la app parece rota sin explicación.
-function imageRow(url: string, alt: string, labels: InlineLabels): HTMLElement {
+///
+/// `docId` es el documento de la pestaña activa: las rutas relativas se resuelven contra
+/// SU carpeta, no contra la del documento que el backend tenga como activo.
+function imageRow(
+  url: string,
+  alt: string,
+  labels: InlineLabels,
+  docId: number | undefined,
+): HTMLElement {
   const wrap = row(labels.image, url);
   const value = wrap.querySelector<HTMLElement>(".inline-preview-value")!;
-  void invoke<string>("render_image", { url })
+  void invoke<string>("render_image", { url, docId })
     .then((dataUri) => {
       // <img> con data URI y NO innerHTML: un SVG incrustado así no ejecuta los scripts que
       // pudiera traer dentro. Mismo criterio que la fórmula.
@@ -131,7 +139,10 @@ function mathRow(source: string, labels: InlineLabels): HTMLElement {
 /// Unicode. Coinciden para todo el plano básico (acentos, eñes, CJK común) y solo divergen
 /// con caracteres del plano astral, como los emoji. Es la MISMA convención que ya usan el
 /// resaltado y el corrector; cambiarla aquí sola crearía una segunda verdad.
-export function inlinePreviewExtension(getLabels: () => InlineLabels): Extension {
+export function inlinePreviewExtension(
+  getLabels: () => InlineLabels,
+  getDocId: () => number | undefined,
+): Extension {
   return hoverTooltip(async (view, pos) => {
     let target: InlineTarget | null = null;
     try {
@@ -143,7 +154,7 @@ export function inlinePreviewExtension(getLabels: () => InlineLabels): Extension
       return null; // un popover que falla no debe interrumpir la escritura
     }
     if (!target) return null;
-    const dom = render(target, getLabels());
+    const dom = render(target, getLabels(), getDocId());
     return { pos, above: true, create: () => ({ dom }) };
   });
 }

@@ -70,7 +70,9 @@ const spellField = StateField.define<Misspelling[]>({
 // eventos del documento, asi que es un div HTML custom). ---
 let activeMenu: HTMLElement | null = null;
 
-function closeSpellMenu(): void {
+/// Cierra el menu de sugerencias si esta abierto. Lo usa tambien el cambio de pestaña: el
+/// menu guarda offsets del documento que se deja de mostrar.
+export function closeSpellMenu(): void {
   if (activeMenu) {
     activeMenu.remove();
     activeMenu = null;

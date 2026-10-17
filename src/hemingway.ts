@@ -5,7 +5,7 @@ import { EditorState, Compartment } from "@codemirror/state";
 import { flashStatus } from "./status";
 import { t } from "./i18n";
 
-// --- M9.2: modo Hemingway (Ctrl+T): no puedes borrar lo que escribiste ---
+// --- M9.2: modo Hemingway (Ctrl+Shift+H): no puedes borrar lo que escribiste ---
 // Paridad con el upstream (apostrophe/text_buffer.py: do_delete_range bloquea el borrado y
 // do_insert_text bloquea escribir sobre una seleccion). Lo replicamos con un changeFilter
 // que RECHAZA solo las transacciones del USUARIO que remueven texto existente: borrar/cortar

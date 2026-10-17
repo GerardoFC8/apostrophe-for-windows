@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { view, getText } from "./editor";
+import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
 import { t } from "./i18n";
 
@@ -77,15 +78,23 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
 }
 
+// Numero del ultimo render pedido. Con pestañas, un render lento de la pestaña anterior
+// puede llegar DESPUES que el de la nueva: solo se pinta la respuesta mas reciente.
+let renderSeq = 0;
+
 export async function render(): Promise<void> {
   // El preview que se actualiza YA es el feedback; no se ensucia la barra con
   // "convirtiendo…"/"listo". Solo se avisa si falla (ademas del error en el panel).
+  const seq = ++renderSeq;
   try {
-    const html = await invoke<string>("preview_markdown", { text: getText() });
+    // docId: pandoc resuelve las imagenes relativas contra la carpeta de ESTE documento.
+    const html = await invoke<string>("preview_markdown", { text: getText(), docId: activeDocId() });
+    if (seq !== renderSeq) return; // llego tarde: ya se pidio otro
     lastPreviewHtml = html;
     preview.srcdoc = withTheme(html);
     pushToPreviewWindow(); // M18: si hay ventana desacoplada, se actualiza con el mismo HTML
   } catch (err) {
+    if (seq !== renderSeq) return;
     flashStatus(t("status.previewFailed"), 4000);
     preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;
   }

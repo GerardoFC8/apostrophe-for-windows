@@ -68,6 +68,18 @@ export interface Messages {
   "window.maximize": string;
   "window.close": string;
 
+  // Barra de pestañas
+  "tabs.listLabel": string;
+  "tabs.new": string;
+  "tabs.newHint": string;
+  /// Nombre accesible del boton × de una pestaña ({name} = nombre del documento).
+  "tabs.close": string;
+  "tabs.closeHint": string;
+  /// Nombre accesible de una pestaña con cambios: el ● es solo visual.
+  "tabs.unsavedLabel": string;
+  /// Tooltip de una pestaña recuperada de un snapshot ({path} = archivo original).
+  "tabs.restoredFrom": string;
+
   // Barra de cambio externo
   "external.message": string;
   "external.reload": string;
@@ -88,7 +100,9 @@ export interface Messages {
   "status.exported": string;
   "status.reloaded": string;
   "status.changedOnDisk": string;
-  "status.restored": string;
+  "status.restored": Plural;
+  "status.alreadyOpen": string;
+  "status.pathOpenInOtherTab": string;
   "status.hemingway": string;
   "status.focusOn": string;
   "status.focusOff": string;
@@ -111,6 +125,10 @@ export interface Messages {
   "confirm.openConfirm": string;
   "confirm.closeTitle": string;
   "confirm.closeMessage": string;
+  /// Cierre de la ventana con varias pestañas: cuantos documentos pierden cambios.
+  "confirm.closeWindowMessage": Plural;
+  /// Cierre de UNA pestaña con cambios ({name} = nombre del documento).
+  "confirm.closeTabMessage": string;
   "confirm.closeConfirm": string;
   "confirm.newTitle": string;
   "confirm.newConfirm": string;
@@ -121,6 +139,7 @@ export interface Messages {
   "shortcuts.file": string;
   "shortcuts.editing": string;
   "shortcuts.view": string;
+  "shortcuts.tabs": string;
   "shortcuts.writingModes": string;
   "shortcuts.spellcheck": string;
   "shortcuts.help": string;
@@ -129,6 +148,10 @@ export interface Messages {
   "shortcuts.saveAs": string;
   "shortcuts.newDoc": string;
   "shortcuts.export": string;
+  "shortcuts.newTab": string;
+  "shortcuts.closeTab": string;
+  "shortcuts.nextTab": string;
+  "shortcuts.prevTab": string;
   "shortcuts.bold": string;
   "shortcuts.italic": string;
   "shortcuts.strikethrough": string;
@@ -194,6 +217,14 @@ const ES: Messages = {
   "window.maximize": "Maximizar",
   "window.close": "Cerrar",
 
+  "tabs.listLabel": "Documentos abiertos",
+  "tabs.new": "Nueva pestaña",
+  "tabs.newHint": "Nueva pestaña (Ctrl+T)",
+  "tabs.close": "Cerrar {name}",
+  "tabs.closeHint": "Cerrar pestaña (Ctrl+W)",
+  "tabs.unsavedLabel": "{name}, con cambios sin guardar",
+  "tabs.restoredFrom": "Recuperado de {path}",
+
   "external.message": "El archivo cambió en disco.",
   "external.reload": "Recargar y perder mis cambios",
   "external.keep": "Mantener mis cambios",
@@ -211,7 +242,13 @@ const ES: Messages = {
   "status.exported": "exportado",
   "status.reloaded": "Archivo recargado desde disco",
   "status.changedOnDisk": "El archivo cambió en disco — recargado",
-  "status.restored": "Se restauró trabajo no guardado de la sesión anterior",
+  "status.restored": {
+    one: "Se restauró trabajo no guardado de la sesión anterior",
+    other: "Se restauraron {n} documentos no guardados de la sesión anterior",
+  },
+  "status.alreadyOpen": "ese archivo ya estaba abierto",
+  "status.pathOpenInOtherTab":
+    "ese archivo ya está abierto en otra pestaña — ciérrala o elige otro nombre",
   "status.hemingway": "El texto no se puede borrar en modo Hemingway",
   "status.focusOn": "Modo enfoque activado",
   "status.focusOff": "Modo enfoque desactivado",
@@ -236,6 +273,11 @@ const ES: Messages = {
   "confirm.openConfirm": "Descartar y abrir",
   "confirm.closeTitle": "¿Cerrar sin guardar?",
   "confirm.closeMessage": "El documento tiene cambios que se perderán.",
+  "confirm.closeWindowMessage": {
+    one: "Un documento tiene cambios que se perderán.",
+    other: "{n} documentos tienen cambios que se perderán.",
+  },
+  "confirm.closeTabMessage": "«{name}» tiene cambios que se perderán.",
   "confirm.closeConfirm": "Descartar y cerrar",
   "confirm.newTitle": "¿Crear un documento nuevo?",
   "confirm.newConfirm": "Descartar y crear",
@@ -245,6 +287,7 @@ const ES: Messages = {
   "shortcuts.file": "Archivo",
   "shortcuts.editing": "Edición y formato",
   "shortcuts.view": "Vista",
+  "shortcuts.tabs": "Pestañas",
   "shortcuts.writingModes": "Modos de escritura",
   "shortcuts.spellcheck": "Corrector",
   "shortcuts.help": "Ayuda",
@@ -253,6 +296,10 @@ const ES: Messages = {
   "shortcuts.saveAs": "Guardar como",
   "shortcuts.newDoc": "Nuevo documento",
   "shortcuts.export": "Exportar",
+  "shortcuts.newTab": "Nueva pestaña",
+  "shortcuts.closeTab": "Cerrar pestaña",
+  "shortcuts.nextTab": "Pestaña siguiente",
+  "shortcuts.prevTab": "Pestaña anterior",
   "shortcuts.bold": "Negrita",
   "shortcuts.italic": "Cursiva",
   "shortcuts.strikethrough": "Tachado",
@@ -319,6 +366,14 @@ const EN: Messages = {
   "window.maximize": "Maximize",
   "window.close": "Close",
 
+  "tabs.listLabel": "Open documents",
+  "tabs.new": "New tab",
+  "tabs.newHint": "New tab (Ctrl+T)",
+  "tabs.close": "Close {name}",
+  "tabs.closeHint": "Close tab (Ctrl+W)",
+  "tabs.unsavedLabel": "{name}, unsaved changes",
+  "tabs.restoredFrom": "Recovered from {path}",
+
   "external.message": "The file changed on disk.",
   "external.reload": "Reload and discard my changes",
   "external.keep": "Keep my changes",
@@ -336,7 +391,13 @@ const EN: Messages = {
   "status.exported": "exported",
   "status.reloaded": "File reloaded from disk",
   "status.changedOnDisk": "The file changed on disk — reloaded",
-  "status.restored": "Unsaved work from the previous session was restored",
+  "status.restored": {
+    one: "Unsaved work from the previous session was restored",
+    other: "{n} unsaved documents from the previous session were restored",
+  },
+  "status.alreadyOpen": "that file was already open",
+  "status.pathOpenInOtherTab":
+    "that file is already open in another tab — close it or choose another name",
   "status.hemingway": "Text cannot be deleted in Hemingway mode",
   "status.focusOn": "Focus mode on",
   "status.focusOff": "Focus mode off",
@@ -361,6 +422,11 @@ const EN: Messages = {
   "confirm.openConfirm": "Discard and open",
   "confirm.closeTitle": "Close without saving?",
   "confirm.closeMessage": "The document has changes that will be lost.",
+  "confirm.closeWindowMessage": {
+    one: "One document has changes that will be lost.",
+    other: "{n} documents have changes that will be lost.",
+  },
+  "confirm.closeTabMessage": "“{name}” has changes that will be lost.",
   "confirm.closeConfirm": "Discard and close",
   "confirm.newTitle": "Create a new document?",
   "confirm.newConfirm": "Discard and create",
@@ -370,6 +436,7 @@ const EN: Messages = {
   "shortcuts.file": "File",
   "shortcuts.editing": "Editing and formatting",
   "shortcuts.view": "View",
+  "shortcuts.tabs": "Tabs",
   "shortcuts.writingModes": "Writing modes",
   "shortcuts.spellcheck": "Spell checker",
   "shortcuts.help": "Help",
@@ -378,6 +445,10 @@ const EN: Messages = {
   "shortcuts.saveAs": "Save as",
   "shortcuts.newDoc": "New document",
   "shortcuts.export": "Export",
+  "shortcuts.newTab": "New tab",
+  "shortcuts.closeTab": "Close tab",
+  "shortcuts.nextTab": "Next tab",
+  "shortcuts.prevTab": "Previous tab",
   "shortcuts.bold": "Bold",
   "shortcuts.italic": "Italic",
   "shortcuts.strikethrough": "Strikethrough",

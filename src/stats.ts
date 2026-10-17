@@ -35,9 +35,15 @@ function formatReadTime(rt: ReadTime): string {
   return t("stats.readtime", { time: parts.join(" ") });
 }
 
+// Mismo descarte que el preview: al cambiar de pestaña, una respuesta atrasada de la
+// anterior no debe pisar los contadores de la nueva.
+let statsSeq = 0;
+
 export async function updateStats(): Promise<void> {
+  const seq = ++statsSeq;
   try {
     const s = await invoke<Stats>("count_stats", { text: getText() });
+    if (seq !== statsSeq) return;
     statWords.textContent = tp("stats.words", s.words);
     statChars.textContent = tp("stats.chars", s.characters);
     statSentences.textContent = tp("stats.sentences", s.sentences);
