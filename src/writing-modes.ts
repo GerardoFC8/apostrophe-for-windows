@@ -77,7 +77,7 @@ export function toggleFocusMode(): void {
     // apagado, salir de enfoque NO debe hacer reaparecer ninguna ondulita (M11.1).
     if (spellcheckEnabled) void requestSpellCheck(view, getText(), false);
   }
-  flashStatus(focusMode ? "Modo enfoque activado" : "Modo enfoque desactivado", 1500);
+  flashStatus(t(focusMode ? "status.focusOn" : "status.focusOff"), 1500);
 }
 
 // M11.1: alterna el corrector ortografico (F7, paridad con el upstream). Persiste el nuevo
@@ -92,7 +92,7 @@ export function toggleSpellcheck(): void {
   } else {
     clearSpellSpans(view);
   }
-  flashStatus(spellcheckEnabled ? "Corrector activado" : "Corrector desactivado", 1500);
+  flashStatus(t(spellcheckEnabled ? "status.spellcheckOn" : "status.spellcheckOff"), 1500);
 }
 
 let hemingwayMode = false;
@@ -104,12 +104,7 @@ export function toggleHemingway(): void {
   view.dispatch({
     effects: hemingwayCompartment.reconfigure(hemingwayMode ? hemingwayFilter : []),
   });
-  flashStatus(
-    hemingwayMode
-      ? "Modo Hemingway activado — no puedes borrar texto"
-      : "Modo Hemingway desactivado",
-    1800,
-  );
+  flashStatus(t(hemingwayMode ? "status.hemingwayOn" : "status.hemingwayOff"), 1800);
 }
 
 // M9.3: pantalla completa (F11). Tauri controla el fullscreen REAL del SO; nosotros

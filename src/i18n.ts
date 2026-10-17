@@ -90,6 +90,12 @@ export interface Messages {
   "status.changedOnDisk": string;
   "status.restored": string;
   "status.hemingway": string;
+  "status.focusOn": string;
+  "status.focusOff": string;
+  "status.spellcheckOn": string;
+  "status.spellcheckOff": string;
+  "status.hemingwayOn": string;
+  "status.hemingwayOff": string;
   "status.fullscreenFailed": string;
   "status.closeFailed": string;
   "status.dirtyCheckFailed": string;
@@ -207,6 +213,12 @@ const ES: Messages = {
   "status.changedOnDisk": "El archivo cambió en disco — recargado",
   "status.restored": "Se restauró trabajo no guardado de la sesión anterior",
   "status.hemingway": "El texto no se puede borrar en modo Hemingway",
+  "status.focusOn": "Modo enfoque activado",
+  "status.focusOff": "Modo enfoque desactivado",
+  "status.spellcheckOn": "Corrector activado",
+  "status.spellcheckOff": "Corrector desactivado",
+  "status.hemingwayOn": "Modo Hemingway activado — no puedes borrar texto",
+  "status.hemingwayOff": "Modo Hemingway desactivado",
   "status.fullscreenFailed": "no se pudo cambiar a pantalla completa",
   "status.closeFailed": "no se pudo cerrar la ventana — reintenta",
   "status.dirtyCheckFailed":
@@ -326,6 +338,12 @@ const EN: Messages = {
   "status.changedOnDisk": "The file changed on disk — reloaded",
   "status.restored": "Unsaved work from the previous session was restored",
   "status.hemingway": "Text cannot be deleted in Hemingway mode",
+  "status.focusOn": "Focus mode on",
+  "status.focusOff": "Focus mode off",
+  "status.spellcheckOn": "Spell checker on",
+  "status.spellcheckOff": "Spell checker off",
+  "status.hemingwayOn": "Hemingway mode on — you can't delete text",
+  "status.hemingwayOff": "Hemingway mode off",
   "status.fullscreenFailed": "could not switch to full screen",
   "status.closeFailed": "could not close the window — try again",
   "status.dirtyCheckFailed":
