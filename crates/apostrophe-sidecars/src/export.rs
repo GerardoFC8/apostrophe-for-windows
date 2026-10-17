@@ -2,11 +2,12 @@
 //! archivos temporales. Los argumentos los arma el dominio (`apostrophe_core::convert`);
 //! aca solo se ejecutan.
 //!
-//! Vive aparte de `export_document` para poder probarlo SIN `AppHandle`: recibe una
-//! fabrica de `std::process::Command` por nombre de sidecar. La app le pasa la del plugin
-//! shell (misma resolucion de ruta y, en Windows, sin ventana de consola); los tests le
-//! pasan los binarios que `tauri-build` copia junto al ejecutable de pruebas.
+//! No conoce Tauri, para que lo compartan la GUI y la CLI y para probarlo SIN `AppHandle`:
+//! recibe una fabrica de `std::process::Command` por nombre de sidecar. La GUI le pasa la
+//! del plugin shell (misma resolucion de ruta y, en Windows, sin ventana de consola); la
+//! CLI y los tests, `std_command` sobre la carpeta de instalacion, que hace lo mismo.
 
+use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
@@ -14,8 +15,43 @@ use apostrophe_core::convert::{
     export_args, resource_path_defaults, typst_compile_args, ExportFormat, ExportOptions,
 };
 
+/// Por que fallo un export. Tipado para que la CLI lo traduzca a codigos de salida
+/// estables; la GUI muestra `to_string()`, que conserva los mensajes de siempre.
+#[derive(Debug)]
+pub enum ExportError {
+    /// No se pudo preparar el export: el directorio de trabajo, un temporal, o la fabrica
+    /// no pudo dar el comando (el mensaje es el de la fabrica, sin cambios).
+    Setup(String),
+    /// El sistema no pudo lanzar el proceso (el binario no existe, no hay permisos…).
+    Launch { program: String, message: String },
+    /// El proceso corrio y termino con error: lo unico util es su stderr.
+    Failed {
+        program: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+}
+
+impl fmt::Display for ExportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Setup(message) => f.write_str(message),
+            Self::Launch { program, message } => {
+                write!(f, "no se pudo lanzar el sidecar {program}: {message}")
+            }
+            Self::Failed {
+                program,
+                code,
+                stderr,
+            } => write!(f, "{program} devolvio error (codigo {code:?}): {stderr}"),
+        }
+    }
+}
+
+impl std::error::Error for ExportError {}
+
 /// Lo que el usuario pidio exportar.
-pub(crate) struct ExportJob<'a> {
+pub struct ExportJob<'a> {
     pub format: ExportFormat,
     pub markdown: &'a str,
     pub output: &'a Path,
@@ -29,13 +65,16 @@ pub(crate) struct ExportJob<'a> {
 
 /// Exporta `job` usando `work_dir` como directorio de trabajo PROPIO: lo crea, deja ahi
 /// todos los temporales y lo borra al terminar, falle o no.
-pub(crate) fn export(
+pub fn export(
     sidecar: &dyn Fn(&str) -> Result<Command, String>,
     job: &ExportJob,
     work_dir: &Path,
-) -> Result<(), String> {
-    std::fs::create_dir_all(work_dir)
-        .map_err(|e| format!("no se pudo crear el directorio temporal de export: {e}"))?;
+) -> Result<(), ExportError> {
+    std::fs::create_dir_all(work_dir).map_err(|e| {
+        ExportError::Setup(format!(
+            "no se pudo crear el directorio temporal de export: {e}"
+        ))
+    })?;
     // El borrado va en un `Drop` y no despues de la llamada: asi tambien ocurre si algo
     // entra en panico a mitad del export.
     let _cleanup = RemoveOnDrop(work_dir);
@@ -55,7 +94,7 @@ fn export_in(
     sidecar: &dyn Fn(&str) -> Result<Command, String>,
     job: &ExportJob,
     work_dir: &Path,
-) -> Result<(), String> {
+) -> Result<(), ExportError> {
     let path_str = |p: &Path| p.to_string_lossy().into_owned();
 
     // Solo sirve una carpeta que EXISTA. `Path::new("nota.md").parent()` es `Some("")`, y
@@ -66,7 +105,7 @@ fn export_in(
 
     let input = work_dir.join("documento.md");
     std::fs::write(&input, job.markdown.as_bytes())
-        .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
+        .map_err(|e| setup(format!("no se pudo escribir el temporal de export: {e}")))?;
 
     // La hoja de estilos del preview (un `<style>` que arma el frontend) va a otro
     // temporal: pandoc solo la acepta como ARCHIVO via --include-in-header. Solo se
@@ -74,7 +113,7 @@ fn export_in(
     let header = if job.format == ExportFormat::Html && !job.css.is_empty() {
         let path = work_dir.join("estilo.head.html");
         std::fs::write(&path, job.css.as_bytes())
-            .map_err(|e| format!("no se pudo escribir la hoja de estilos: {e}"))?;
+            .map_err(|e| setup(format!("no se pudo escribir la hoja de estilos: {e}")))?;
         Some(path_str(&path))
     } else {
         None
@@ -86,7 +125,7 @@ fn export_in(
         Some(dir) if job.format == ExportFormat::Pdf => {
             let path = work_dir.join("recursos.yaml");
             std::fs::write(&path, resource_path_defaults(&path_str(dir)))
-                .map_err(|e| format!("no se pudo escribir los defaults de pandoc: {e}"))?;
+                .map_err(|e| setup(format!("no se pudo escribir los defaults de pandoc: {e}")))?;
             Some(path_str(&path))
         }
         _ => None,
@@ -130,6 +169,11 @@ fn export_in(
     run(sidecar, "typst", args, work_dir)
 }
 
+/// Atajo para los temporales que no se pudieron escribir.
+fn setup(message: String) -> ExportError {
+    ExportError::Setup(message)
+}
+
 /// Lanza un sidecar en `cwd` y espera a que termine. Falla con su stderr, que es lo unico
 /// util cuando pandoc o typst rechazan una entrada.
 fn run(
@@ -137,18 +181,22 @@ fn run(
     name: &str,
     args: Vec<String>,
     cwd: &Path,
-) -> Result<(), String> {
-    let output = sidecar(name)?
+) -> Result<(), ExportError> {
+    let output = sidecar(name)
+        .map_err(ExportError::Setup)?
         .args(args)
         .current_dir(cwd)
         .output()
-        .map_err(|e| format!("no se pudo lanzar el sidecar {name}: {e}"))?;
+        .map_err(|e| ExportError::Launch {
+            program: name.to_string(),
+            message: e.to_string(),
+        })?;
     if !output.status.success() {
-        return Err(format!(
-            "{name} devolvio error (codigo {:?}): {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        return Err(ExportError::Failed {
+            program: name.to_string(),
+            code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
     }
     Ok(())
 }
@@ -158,10 +206,12 @@ mod tests {
     //! Extremo a extremo con los sidecars REALES: es la unica forma de ver los fallos que
     //! nacen entre pandoc y typst, que los tests de argumentos del dominio no ven.
     //!
-    //! `tauri-build` copia `binaries/<nombre>-<target triple>` junto al ejecutable de
-    //! pruebas, sin el triple; se buscan ahi con la MISMA regla que usa la app
-    //! (`sidecar_path`). Si no estan, el test se salta avisando en vez de fallar. En CI
-    //! (`windows-latest`) los descargan `scripts/fetch-*.ps1` antes de `cargo test`.
+    //! El `tauri-build` de `src-tauri` copia `binaries/<nombre>-<target triple>` a
+    //! `target/<perfil>/`, sin el triple; se buscan ahi con la MISMA regla que usan la app
+    //! y la CLI (`install_dir`). Con `cargo test --workspace` ya estan copiados; con
+    //! `-p apostrophe-sidecars`, solo si antes se compilo la app. Si no estan, el test se
+    //! salta avisando en vez de fallar. En CI (`windows-latest`) los descargan
+    //! `scripts/fetch-*.ps1` antes de `cargo test`.
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -177,11 +227,12 @@ mod tests {
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
-    /// Fabrica de comandos de los tests: los sidecars junto al ejecutable de pruebas, o
-    /// `None` si faltan (el test se salta).
+    /// Fabrica de comandos de los tests: la misma de la CLI (`std_command` sobre la
+    /// carpeta de instalacion), o `None` si faltan los sidecars (el test se salta).
     fn sidecars() -> Option<impl Fn(&str) -> Result<Command, String>> {
+        let dir = crate::install_dir().ok()?;
         for name in ["pandoc", "typst"] {
-            let path = crate::sidecar_path(name).ok()?;
+            let path = crate::sidecar_path_in(&dir, name);
             if !path.exists() {
                 eprintln!(
                     "SALTADO: falta el sidecar {name} en {}. Ejecuta scripts/fetch-{name}.ps1.",
@@ -190,7 +241,7 @@ mod tests {
                 return None;
             }
         }
-        Some(|name: &str| crate::sidecar_path(name).map(Command::new))
+        Some(move |name: &str| Ok(crate::std_command(&dir, name)))
     }
 
     /// Directorio temporal propio del test, vacio.
@@ -397,13 +448,120 @@ mod tests {
             &base.join("trabajo"),
         )
         .expect("el export a HTML fallo");
-        crate::embed_html_images_in(&out, Some(&dir)).expect("no se incrustaron las imagenes");
+        crate::images::embed_html_images_in(&out, Some(&dir))
+            .expect("no se incrustaron las imagenes");
         let html = std::fs::read_to_string(&out).unwrap();
         assert!(
             html.contains("data:image/png;base64,"),
             "el HTML no incrusto la imagen"
         );
         assert!(!html.contains("src=\"gato.png\""), "quedo el src relativo");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn los_mensajes_de_error_son_los_que_ya_mostraba_la_gui() {
+        // La GUI muestra `to_string()` tal cual: tipar el error no debe cambiarle la copia.
+        let setup =
+            ExportError::Setup("no se pudo crear el directorio temporal de export: x".into());
+        assert_eq!(
+            setup.to_string(),
+            "no se pudo crear el directorio temporal de export: x"
+        );
+        let launch = ExportError::Launch {
+            program: "pandoc".into(),
+            message: "No such file or directory".into(),
+        };
+        assert_eq!(
+            launch.to_string(),
+            "no se pudo lanzar el sidecar pandoc: No such file or directory"
+        );
+        let failed = ExportError::Failed {
+            program: "typst".into(),
+            code: Some(1),
+            stderr: "error: boom".into(),
+        };
+        assert_eq!(
+            failed.to_string(),
+            "typst devolvio error (codigo Some(1)): error: boom"
+        );
+        let killed = ExportError::Failed {
+            program: "pandoc".into(),
+            code: None,
+            stderr: String::new(),
+        };
+        assert_eq!(killed.to_string(), "pandoc devolvio error (codigo None): ");
+    }
+
+    #[test]
+    fn el_error_de_la_fabrica_llega_sin_cambios() {
+        // La fabrica de la GUI ya arma su propio mensaje ("no se encontro el sidecar …").
+        let base = scratch("factory");
+        let out = base.join("salida.docx");
+        let broken = |name: &str| -> Result<Command, String> {
+            Err(format!("no se encontro el sidecar {name}: falta"))
+        };
+        let err = export(
+            &broken,
+            &job(ExportFormat::Docx, "Hola\n", &out, None),
+            &base.join("t"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ExportError::Setup(m) if m == "no se encontro el sidecar pandoc: falta"),
+            "{err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_sidecar_que_no_arranca_es_un_error_de_lanzamiento() {
+        let base = scratch("launch");
+        let out = base.join("salida.html");
+        let missing = base.join("no-existe");
+        let factory = |_: &str| -> Result<Command, String> { Ok(Command::new(&missing)) };
+        let err = export(
+            &factory,
+            &job(ExportFormat::Html, "Hola\n", &out, None),
+            &base.join("t"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ExportError::Launch { program, .. } if program == "pandoc"),
+            "{err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_sidecar_que_falla_devuelve_su_codigo_y_su_stderr() {
+        // `sh -c` recibe los argumentos de pandoc como `$0`, `$1`…, y los ignora.
+        let base = scratch("failed");
+        let out = base.join("salida.html");
+        let factory = |_: &str| -> Result<Command, String> {
+            let mut command = Command::new("sh");
+            command.args(["-c", "echo 'entrada rota' >&2; exit 3"]);
+            Ok(command)
+        };
+        let err = export(
+            &factory,
+            &job(ExportFormat::Html, "Hola\n", &out, None),
+            &base.join("t"),
+        )
+        .unwrap_err();
+        match err {
+            ExportError::Failed {
+                program,
+                code,
+                stderr,
+            } => {
+                assert_eq!(program, "pandoc");
+                assert_eq!(code, Some(3));
+                assert_eq!(stderr, "entrada rota\n");
+            }
+            other => panic!("se esperaba Failed: {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

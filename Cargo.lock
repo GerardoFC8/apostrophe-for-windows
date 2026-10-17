@@ -52,6 +52,7 @@ name = "apostrophe"
 version = "0.3.0"
 dependencies = [
  "apostrophe-core",
+ "apostrophe-sidecars",
  "base64 0.22.1",
  "notify-debouncer-full",
  "serde",
@@ -78,6 +79,14 @@ dependencies = [
  "regex",
  "serde",
  "spellbook",
+]
+
+[[package]]
+name = "apostrophe-sidecars"
+version = "0.3.0"
+dependencies = [
+ "apostrophe-core",
+ "base64 0.22.1",
 ]
 
 [[package]]

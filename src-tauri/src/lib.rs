@@ -6,7 +6,9 @@
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
 // M8.4a: autosave por snapshots en app_local_data_dir()/snapshots.
 // M8.4b: watcher de cambios externos (notify-debouncer-full).
-mod export;
+//
+// El export, la ruta de los sidecars, el incrustado de imagenes y la carga del
+// diccionario viven en `apostrophe-sidecars`, sin Tauri, para compartirlos con la CLI.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -22,6 +24,9 @@ use notify_debouncer_full::{
 use apostrophe_core::document::DocumentStore;
 use apostrophe_core::recents::Recents;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
+use apostrophe_sidecars::dictionary::{load_es, DictionaryError};
+use apostrophe_sidecars::images::{embed_html_images_in, image_data_uri};
+use apostrophe_sidecars::sidecar_path;
 use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -122,33 +127,6 @@ async fn run_sidecar(
         return Err(format!("{name} devolvio error (codigo {code:?}): {stderr}"));
     }
     String::from_utf8(stdout).map_err(|e| format!("la salida de {name} no es UTF-8: {e}"))
-}
-
-/// Ruta ABSOLUTA de un sidecar, con la MISMA regla que aplica tauri-plugin-shell en
-/// `relative_command_path`: el binario vive junto al ejecutable actual, con el nombre
-/// pelado (Tauri quita el target triple al empaquetar) y `.exe` en Windows.
-///
-/// Se replica aca porque el plugin solo expone un `Command`, no la ruta, y hace falta
-/// saber si el archivo EXISTE antes de lanzar nada: el export a PDF y `render_math`
-/// fallan con un mensaje util si falta typst. Los tests de `export` la usan para
-/// encontrar los sidecars con la misma regla que la app.
-fn sidecar_path(name: &str) -> Result<std::path::PathBuf, String> {
-    let exe = tauri::utils::platform::current_exe()
-        .map_err(|e| format!("no se pudo ubicar el ejecutable: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "el ejecutable no tiene directorio padre".to_string())?;
-    // Bajo `cargo test` el binario queda en deps/; el sidecar esta un nivel arriba.
-    let base = if dir.ends_with("deps") {
-        dir.parent().unwrap_or(dir)
-    } else {
-        dir
-    };
-    let mut path = base.join(name);
-    if cfg!(windows) {
-        path.as_mut_os_string().push(".exe");
-    }
-    Ok(path)
 }
 
 /// Adaptador primario (IPC): expone el contador de stats del dominio. La logica
@@ -329,43 +307,6 @@ async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String,
     tauri::async_runtime::spawn_blocking(move || image_data_uri(&url, doc_dir.as_deref()))
         .await
         .map_err(|_| "unreadable".to_string())?
-}
-
-/// Lee el archivo, lo valida y lo codifica. Aislado del comando porque es I/O bloqueante y
-/// corre en `spawn_blocking`.
-///
-/// El formato con el que se incrusta lo decide el CONTENIDO, no la extension. La extension
-/// solo filtra que archivos vale la pena abrir; mandarla a decidir el MIME rechazaria una
-/// imagen perfectamente valida por tener el nombre cambiado — un `.png` que en realidad es
-/// WebP es de lo mas comun en material descargado, y los navegadores lo muestran sin
-/// chistar porque miran los bytes. La garantia que importa se mantiene: solo se incrusta lo
-/// que `sniff_format` reconoce como una imagen soportada.
-fn image_data_uri(url: &str, doc_dir: Option<&Path>) -> Result<String, String> {
-    use apostrophe_core::image::{resolve_image, sniff_format, ImageSource, MAX_IMAGE_BYTES};
-    use base64::Engine;
-
-    let path = match resolve_image(url, doc_dir) {
-        ImageSource::Local { path, .. } => path,
-        ImageSource::Remote => return Err("remote".into()),
-        ImageSource::NoBaseDir => return Err("no-base-dir".into()),
-        ImageSource::Unsupported => return Err("unsupported".into()),
-    };
-
-    // El tamano se mira ANTES de leer: un archivo de cientos de megas no debe llegar a
-    // memoria solo para descubrir despues que no cabia en el popover.
-    let size = std::fs::metadata(&path).map_err(|_| "not-found")?.len();
-    if size > MAX_IMAGE_BYTES {
-        return Err("too-large".into());
-    }
-
-    let bytes = std::fs::read(&path).map_err(|_| "unreadable")?;
-    let format = sniff_format(&bytes).ok_or("unsupported")?;
-
-    Ok(format!(
-        "data:{};base64,{}",
-        format.mime(),
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
 }
 
 /// Elige una imagen con el selector nativo y devuelve el fragmento `![](ruta)` listo para
@@ -961,8 +902,8 @@ async fn save_document_as(
 }
 
 /// Exporta el markdown al formato que el usuario elija en el dialogo nativo (M12).
-/// Reusa los sidecars via el Converter port (ver `export::export`). Devuelve la ruta de
-/// salida, o `None` si se cancela. `async` + spawn_blocking (gotcha deadlock M4).
+/// Reusa los sidecars via el Converter port (ver `apostrophe_sidecars::export`). Devuelve
+/// la ruta de salida, o `None` si se cancela. `async` + spawn_blocking (gotcha deadlock M4).
 ///
 /// El dialogo ofrece un filtro por formato ("Guardar como tipo") pero devuelve SOLO la
 /// ruta, sin decir cual quedo seleccionado: por eso el formato se deduce de la extension
@@ -1027,9 +968,9 @@ async fn export_document(
         );
     }
 
-    // Los procesos y sus temporales los orquesta `export::export` (probado de extremo a
-    // extremo con los sidecars reales). Aca solo se le da la fabrica de comandos del
-    // plugin shell: misma resolucion de ruta del sidecar y, en Windows, sin consola.
+    // Los procesos y sus temporales los orquesta `apostrophe_sidecars::export` (probado de
+    // extremo a extremo con los sidecars reales). Aca solo se le da la fabrica de comandos
+    // del plugin shell: misma resolucion de ruta del sidecar y, en Windows, sin consola.
     // Lanzar procesos y esperarlos es bloqueante: va fuera del hilo de eventos.
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let work_dir = std::env::temp_dir().join(format!(
@@ -1047,7 +988,7 @@ async fn export_document(
                 .map(std::process::Command::from)
                 .map_err(|e| format!("no se encontro el sidecar {name}: {e}"))
         };
-        let job = export::ExportJob {
+        let job = apostrophe_sidecars::export::ExportJob {
             format,
             markdown: &text,
             output: &job_out,
@@ -1055,7 +996,8 @@ async fn export_document(
             css: &css,
             accent: &accent,
         };
-        export::export(&sidecar, &job, &work_dir)
+        // La GUI muestra el error tal cual: `to_string()` conserva los mensajes de siempre.
+        apostrophe_sidecars::export::export(&sidecar, &job, &work_dir).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("error al exportar: {e}"))??;
@@ -1088,16 +1030,6 @@ async fn embed_html_images(path: &Path, doc_dir: Option<PathBuf>) -> Result<(), 
     tauri::async_runtime::spawn_blocking(move || embed_html_images_in(&path, doc_dir.as_deref()))
         .await
         .map_err(|e| format!("error al incrustar las imagenes del export: {e}"))?
-}
-
-/// Cuerpo sincrono de `embed_html_images`, aparte para poder probarlo sin runtime de Tauri.
-fn embed_html_images_in(path: &Path, doc_dir: Option<&Path>) -> Result<(), String> {
-    let html = std::fs::read_to_string(path)
-        .map_err(|e| format!("no se pudo releer el HTML exportado: {e}"))?;
-    let embedded =
-        apostrophe_core::image::rewrite_img_srcs(&html, |src| image_data_uri(src, doc_dir).ok());
-    std::fs::write(path, embedded)
-        .map_err(|e| format!("no se pudo escribir el HTML exportado: {e}"))
 }
 
 // --- M6: spellcheck ---
@@ -1135,20 +1067,20 @@ async fn spellcheck(
     .map_err(|e| format!("error en el chequeo ortografico: {e}"))
 }
 
-/// Lee un archivo de diccionario. Bundle: via BaseDirectory::Resource. Dev: fallback
-/// al dir del crate (donde fetch-dictionaries.ps1 deja los archivos), porque en
-/// `tauri dev` el resolver de Resource puede no encontrar los resources.
-fn read_dict_file(app: &tauri::AppHandle, name: &str) -> Result<String, String> {
-    if let Ok(p) = app
-        .path()
-        .resolve(format!("dictionaries/{name}"), BaseDirectory::Resource)
-    {
-        if let Ok(s) = std::fs::read_to_string(&p) {
-            return Ok(s);
-        }
+/// Carga el diccionario `es`. Bundle: la carpeta `dictionaries/` de los recursos
+/// (BaseDirectory::Resource). Dev: fallback al dir del crate (donde fetch-dictionaries.ps1
+/// deja los archivos), porque en `tauri dev` el resolver de Resource puede no encontrar
+/// los resources. Solo se cae al fallback si FALTAN archivos: un diccionario roto en el
+/// bundle se informa tal cual.
+fn load_bundled_dictionary(app: &tauri::AppHandle) -> Result<SpellbookDictionary, DictionaryError> {
+    let dev_dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/dictionaries"));
+    match app.path().resolve("dictionaries", BaseDirectory::Resource) {
+        Ok(dir) => match load_es(&dir) {
+            Err(DictionaryError::Missing { .. }) => load_es(dev_dir),
+            loaded => loaded,
+        },
+        Err(_) => load_es(dev_dir),
     }
-    let dev_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/dictionaries/");
-    std::fs::read_to_string(format!("{dev_dir}{name}")).map_err(|e| format!("{name}: {e}"))
 }
 
 /// Carga el diccionario es en background (off-thread, es caro) y lo guarda en
@@ -1157,12 +1089,8 @@ fn load_dictionary(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let h = handle.clone();
-        let loaded = tauri::async_runtime::spawn_blocking(move || -> Result<SpellbookDictionary, String> {
-            let aff = read_dict_file(&h, "es.aff")?;
-            let dic = read_dict_file(&h, "es.dic")?;
-            SpellbookDictionary::load(&aff, &dic)
-        })
-        .await;
+        let loaded =
+            tauri::async_runtime::spawn_blocking(move || load_bundled_dictionary(&h)).await;
         match loaded {
             Ok(Ok(dict)) => {
                 *handle.state::<SpellState>().0.write().unwrap() = Some(Arc::new(dict));

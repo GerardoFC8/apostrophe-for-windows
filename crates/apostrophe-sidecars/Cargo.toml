@@ -1,0 +1,13 @@
+[package]
+name = "apostrophe-sidecars"
+version = "0.3.0"
+edition = "2021"
+description = "Adaptador secundario de Apostrophe (hexagonal, ADR-0001): lanza pandoc y typst, incrusta imagenes y carga el diccionario. Sin dependencias de Tauri, para que lo compartan la GUI y la CLI."
+authors = ["Gerardo Franco"]
+
+[dependencies]
+# El dominio arma los argumentos de pandoc y typst; este crate solo lanza los procesos.
+# `spellbook-backend` trae el diccionario Hunspell real que carga `dictionary::load_es`.
+apostrophe-core = { path = "../apostrophe-core", features = ["spellbook-backend"] }
+# Las imagenes del HTML exportado viajan como data URI (mismo camino que el preview).
+base64 = "0.22"
