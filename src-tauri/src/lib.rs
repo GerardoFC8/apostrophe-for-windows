@@ -1352,9 +1352,10 @@ struct SnapshotSession {
     closing: AtomicBool,
 }
 
-/// Snapshot huerfano de una sesion anterior (crash) detectado al arrancar, para que el
-/// frontend lo restaure. Espejo del patron PendingFile.
-struct PendingRestore(Mutex<Option<RestoredSnapshot>>);
+/// Snapshots huerfanos de una sesion anterior (crash) detectados al arrancar, para que
+/// el frontend los restaure: uno por documento que tenia cambios sin guardar, del mas
+/// reciente al mas antiguo. Espejo del patron PendingFiles.
+struct PendingRestore(Mutex<Vec<RestoredSnapshot>>);
 
 /// Contenido y metadatos de un snapshot huerfano listo para restaurar en el editor.
 #[derive(serde::Serialize, Clone)]
@@ -1362,6 +1363,8 @@ struct RestoredSnapshot {
     content: String,
     /// Nombre del archivo original si lo habia (para el aviso), o None.
     original_file_name: Option<String>,
+    /// Ruta completa del archivo original si la habia, o None (documento sin guardar).
+    original_path: Option<String>,
 }
 
 /// Devuelve (y crea si no existe) el directorio de snapshots bajo app_local_data_dir.
@@ -1409,50 +1412,47 @@ fn delete_snapshot_files(dir: &Path, id: &str) {
     let _ = std::fs::remove_file(dir.join(apostrophe_core::snapshot::meta_file_name(id)));
 }
 
-/// Busca el snapshot mas reciente en el dir (huerfano de una sesion anterior). Devuelve
-/// el contenido y, opcionalmente, el nombre del archivo original. Tolerante a archivos
-/// corruptos: los saltea sin propagarlos.
-fn find_latest_orphan(dir: &Path) -> Option<(String, RestoredSnapshot)> {
-    let entries = std::fs::read_dir(dir).ok()?;
+/// Busca los snapshots huerfanos del dir (de una sesion anterior), del mas reciente al
+/// mas antiguo, con el contenido y, si lo habia, el archivo original. Tolerante a
+/// archivos corruptos: los saltea sin propagarlos.
+fn find_orphans(dir: &Path) -> Vec<RestoredSnapshot> {
+    use apostrophe_core::snapshot::{
+        meta_file_name, parse_snapshot_id, snapshot_file_name, sort_newest_first, SnapshotMeta,
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
 
-    let mut best: Option<(u64, String, apostrophe_core::snapshot::SnapshotMeta)> = None;
-
+    let mut found: Vec<(String, SnapshotMeta)> = Vec::new();
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        let Some(id) = apostrophe_core::snapshot::parse_snapshot_id(&file_name) else {
+        let Some(id) = parse_snapshot_id(&file_name) else {
             continue; // no es un .snapshot -> saltar
         };
-        let meta_path = dir.join(apostrophe_core::snapshot::meta_file_name(id));
-        let Ok(meta_bytes) = std::fs::read(&meta_path) else {
+        let Ok(meta_bytes) = std::fs::read(dir.join(meta_file_name(id))) else {
             continue;
         };
-        let Ok(meta) =
-            serde_json::from_slice::<apostrophe_core::snapshot::SnapshotMeta>(&meta_bytes)
-        else {
+        let Ok(meta) = serde_json::from_slice::<SnapshotMeta>(&meta_bytes) else {
             continue; // metadata corrupta -> saltar
         };
-        if best.as_ref().is_none_or(|(t, _, _)| meta.saved_at > *t) {
-            best = Some((meta.saved_at, id.to_owned(), meta));
-        }
+        found.push((id.to_owned(), meta));
     }
+    sort_newest_first(&mut found);
 
-    let (_, id, meta) = best?;
-    let snap_path = dir.join(apostrophe_core::snapshot::snapshot_file_name(&id));
-    let content = std::fs::read_to_string(&snap_path).ok()?;
-
-    let original_file_name = meta
-        .original_path
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().into_owned());
-
-    Some((
-        id,
-        RestoredSnapshot {
-            content,
-            original_file_name,
-        },
-    ))
+    found
+        .into_iter()
+        .filter_map(|(id, meta)| {
+            let content = std::fs::read_to_string(dir.join(snapshot_file_name(&id))).ok()?;
+            let original = meta.original_path.as_ref();
+            Some(RestoredSnapshot {
+                content,
+                original_file_name: original
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned()),
+                original_path: original.map(|p| p.to_string_lossy().into_owned()),
+            })
+        })
+        .collect()
 }
 
 /// Borra el snapshot de UN documento de la sesion (best-effort, fuera del hilo de
@@ -1538,11 +1538,21 @@ async fn write_snapshot(
     }
 }
 
-/// Devuelve (y limpia) el snapshot huerfano pendiente de restaurar, si lo hay.
-/// Espejo de take_pending_file.
+/// Devuelve el snapshot huerfano MAS RECIENTE pendiente de restaurar, si lo hay, y
+/// descarta los demas. Es el comportamiento del frontend de un solo documento, que solo
+/// puede restaurar uno. Espejo de take_pending_file.
 #[tauri::command]
 fn take_pending_restore(pending: tauri::State<'_, PendingRestore>) -> Option<RestoredSnapshot> {
-    pending.0.lock().unwrap().take()
+    std::mem::take(&mut *pending.0.lock().unwrap())
+        .into_iter()
+        .next()
+}
+
+/// Devuelve (y limpia) TODOS los snapshots huerfanos pendientes, del mas reciente al mas
+/// antiguo: uno por pestaña a restaurar.
+#[tauri::command]
+fn take_pending_restores(pending: tauri::State<'_, PendingRestore>) -> Vec<RestoredSnapshot> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
 }
 
 /// Borra TODOS los archivos .snapshot y .meta.json del directorio (best-effort).
@@ -1635,16 +1645,14 @@ pub fn run() {
             id: uuid::Uuid::new_v4().to_string(),
             closing: AtomicBool::new(false),
         })
-        .manage(PendingRestore(Mutex::new(None)))
+        .manage(PendingRestore(Mutex::new(Vec::new())))
         .setup(|app| {
             load_dictionary(app.handle()); // carga el diccionario es en background
 
-            // M8.4a: restauracion de crash. Detectar snapshot huerfano de sesion anterior
-            // ANTES de procesar argv (el pending file tiene precedencia).
+            // M8.4a: restauracion de crash. Detectar los snapshots huerfanos de la sesion
+            // anterior ANTES de procesar argv (el pending file tiene precedencia).
             if let Ok(dir) = snapshots_dir(app.handle()) {
-                if let Some((_orphan_id, restored)) = find_latest_orphan(&dir) {
-                    *app.state::<PendingRestore>().0.lock().unwrap() = Some(restored);
-                }
+                *app.state::<PendingRestore>().0.lock().unwrap() = find_orphans(&dir);
                 // Barrer TODOS los snapshots y metadatos del arranque anterior (incluyendo
                 // el huerfano que acabamos de cargar en memoria, huerfanos de crashes
                 // anteriores y archivos con meta corrupta). La app esta arrancando: es
@@ -1708,6 +1716,7 @@ pub fn run() {
             take_pending_file,
             write_snapshot,
             take_pending_restore,
+            take_pending_restores,
             reload_from_disk,
             activate_document,
             close_document,
@@ -1720,7 +1729,60 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_doc_path, file_arg};
+    use super::{absolute_doc_path, file_arg, find_orphans};
+
+    /// Deja en `dir` un snapshot con su metadata, como lo dejaria una sesion que crasheo.
+    fn plant_snapshot(dir: &std::path::Path, id: &str, content: &str, saved_at: u64) {
+        use apostrophe_core::snapshot::{meta_file_name, snapshot_file_name, SnapshotMeta};
+        std::fs::write(dir.join(snapshot_file_name(id)), content).unwrap();
+        let meta = SnapshotMeta {
+            original_path: Some(dir.join(format!("{id}.md"))),
+            saved_at,
+        };
+        std::fs::write(
+            dir.join(meta_file_name(id)),
+            serde_json::to_string(&meta).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("apostrophe-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn find_orphans_devuelve_todos_del_mas_reciente_al_mas_antiguo() {
+        let dir = scratch_dir("orphans");
+        plant_snapshot(&dir, "s-1", "uno", 10);
+        plant_snapshot(&dir, "s-2", "dos", 30);
+        plant_snapshot(&dir, "s-3", "tres", 20);
+        let orphans = find_orphans(&dir);
+        let contents: Vec<_> = orphans.iter().map(|o| o.content.as_str()).collect();
+        assert_eq!(contents, vec!["dos", "tres", "uno"]);
+        assert_eq!(orphans[0].original_file_name.as_deref(), Some("s-2.md"));
+        assert_eq!(
+            orphans[0].original_path.as_deref(),
+            Some(dir.join("s-2.md").to_string_lossy().as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_orphans_saltea_los_que_no_tienen_metadata_valida() {
+        let dir = scratch_dir("orphans-corrupt");
+        plant_snapshot(&dir, "ok", "bien", 10);
+        std::fs::write(dir.join("roto.snapshot"), "sin meta").unwrap();
+        std::fs::write(dir.join("malo.snapshot"), "meta corrupta").unwrap();
+        std::fs::write(dir.join("malo.meta.json"), "{no es json").unwrap();
+        let orphans = find_orphans(&dir);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].content, "bien");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn la_ruta_relativa_del_documento_se_vuelve_absoluta() {
