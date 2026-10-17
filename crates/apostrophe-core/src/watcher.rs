@@ -19,13 +19,9 @@ pub enum ChangeKind {
 /// (Windows es case-insensitive y notify puede entregar el nombre con el casing real de
 /// NTFS, distinto del casing con que se abrio el archivo) y es robusta a separadores
 /// (la iteracion por componentes ignora / vs \).
+/// La regla es la misma con la que el workspace reconoce un documento ya abierto.
 pub fn is_relevant_change(watched: &Path, event_path: &Path) -> bool {
-    let w: Vec<_> = watched.components().collect();
-    let e: Vec<_> = event_path.components().collect();
-    w.len() == e.len()
-        && w.iter()
-            .zip(&e)
-            .all(|(a, b)| a.as_os_str().eq_ignore_ascii_case(b.as_os_str()))
+    crate::workspace::same_document_path(watched, event_path)
 }
 
 /// ¿Este tipo de cambio amerita avisar al usuario? Modify/Remove/Rename si; eventos de

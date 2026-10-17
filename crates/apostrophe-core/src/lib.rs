@@ -24,3 +24,4 @@ pub mod spellcheck;
 pub mod stats;
 pub mod table;
 pub mod watcher;
+pub mod workspace;
