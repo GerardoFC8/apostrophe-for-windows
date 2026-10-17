@@ -6,6 +6,8 @@
 // M4: abrir/guardar .md con DocumentStore (managed state) + dialogos nativos.
 // M8.4a: autosave por snapshots en app_local_data_dir()/snapshots.
 // M8.4b: watcher de cambios externos (notify-debouncer-full).
+mod export;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -126,9 +128,10 @@ async fn run_sidecar(
 /// `relative_command_path`: el binario vive junto al ejecutable actual, con el nombre
 /// pelado (Tauri quita el target triple al empaquetar) y `.exe` en Windows.
 ///
-/// Se replica aca porque el plugin solo expone un `Command`, no la ruta, y para el PDF
-/// necesitamos pasarle esa ruta a pandoc por `--pdf-engine`: pandoc lanza el motor el
-/// mismo, y buscaria `typst` en el PATH, donde el sidecar NO esta.
+/// Se replica aca porque el plugin solo expone un `Command`, no la ruta, y hace falta
+/// saber si el archivo EXISTE antes de lanzar nada: el export a PDF y `render_math`
+/// fallan con un mensaje util si falta typst. Los tests de `export` la usan para
+/// encontrar los sidecars con la misma regla que la app.
 fn sidecar_path(name: &str) -> Result<std::path::PathBuf, String> {
     let exe = tauri::utils::platform::current_exe()
         .map_err(|e| format!("no se pudo ubicar el ejecutable: {e}"))?;
@@ -585,11 +588,21 @@ async fn confirm_discard_if_dirty(
 /// Lee un .md de disco a un OpenedDoc y lo fija en el store. Unica fuente del flujo
 /// "leer archivo -> estado del documento", reusada por el dialogo (open_document), el
 /// arranque en frio (setup) y la apertura via asociacion (open_path).
+/// Ruta ABSOLUTA del documento. Abrirlo desde una terminal (`apostrophe.exe nota.md`)
+/// trae una relativa, cuya carpeta es `""`: no serviria para resolver sus imagenes ni como
+/// directorio actual de pandoc al exportar. Se resuelve contra el directorio actual, sin
+/// tocar el disco (`std::path::absolute` no sigue enlaces ni exige que exista). Si no se
+/// puede, se conserva la original: es mejor un documento sin imagenes que no abrirlo.
+fn absolute_doc_path(path: PathBuf) -> PathBuf {
+    std::path::absolute(&path).unwrap_or(path)
+}
+
 fn load_path_into_store(
     app: &tauri::AppHandle,
     path: PathBuf,
     doc: &Doc,
 ) -> Result<OpenedDoc, String> {
+    let path = absolute_doc_path(path);
     let bytes =
         std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
     let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
@@ -948,7 +961,7 @@ async fn save_document_as(
 }
 
 /// Exporta el markdown al formato que el usuario elija en el dialogo nativo (M12).
-/// Reusa el sidecar pandoc via el Converter port (export_args). Devuelve la ruta de
+/// Reusa los sidecars via el Converter port (ver `export::export`). Devuelve la ruta de
 /// salida, o `None` si se cancela. `async` + spawn_blocking (gotcha deadlock M4).
 ///
 /// El dialogo ofrece un filtro por formato ("Guardar como tipo") pero devuelve SOLO la
@@ -963,10 +976,10 @@ async fn export_document(
     css: String,
     accent: String,
 ) -> Result<Option<String>, String> {
-    use apostrophe_core::convert::{export_args, ExportFormat, ExportOptions};
+    use apostrophe_core::convert::ExportFormat;
 
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    // Es lo que despues resuelve las rutas relativas de las imagenes (--resource-path).
+    // Es contra el que se resuelven las rutas relativas de las imagenes.
     let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
 
     let app2 = app.clone();
@@ -1005,72 +1018,53 @@ async fn export_document(
     };
     let out_str = out_path.to_string_lossy().into_owned();
 
-    // PDF lo produce typst, no pandoc: se resuelve la ruta del sidecar ANTES de lanzar
-    // nada, para fallar con un mensaje util en vez del "typst not found" de pandoc.
-    let pdf_engine = if format.needs_pdf_engine() {
-        let engine = sidecar_path("typst")?;
-        if !engine.exists() {
-            return Err(
-                "Falta el motor de PDF. Ejecuta scripts/fetch-typst.ps1 y vuelve a compilar."
-                    .to_string(),
-            );
-        }
-        Some(engine.to_string_lossy().into_owned())
-    } else {
-        None
-    };
+    // PDF lo compila typst: se comprueba el sidecar ANTES de lanzar nada, para fallar
+    // con un mensaje util en vez de un error de proceso.
+    if format.needs_pdf_engine() && !sidecar_path("typst")?.exists() {
+        return Err(
+            "Falta el motor de PDF. Ejecuta scripts/fetch-typst.ps1 y vuelve a compilar."
+                .to_string(),
+        );
+    }
 
-    // Markdown a un temporal; pandoc exporta con --output a la ruta elegida.
+    // Los procesos y sus temporales los orquesta `export::export` (probado de extremo a
+    // extremo con los sidecars reales). Aca solo se le da la fabrica de comandos del
+    // plugin shell: misma resolucion de ruta del sidecar y, en Windows, sin consola.
+    // Lanzar procesos y esperarlos es bloqueante: va fuera del hilo de eventos.
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
-    let tmp = std::env::temp_dir().join(format!(
-        "apostrophe-export-{}-{}.md",
+    let work_dir = std::env::temp_dir().join(format!(
+        "apostrophe-export-{}-{}",
         std::process::id(),
         seq
     ));
-    std::fs::write(&tmp, text.as_bytes())
-        .map_err(|e| format!("no se pudo escribir el temporal de export: {e}"))?;
+    let app2 = app.clone();
+    let job_out = out_path.clone();
+    let job_dir = doc_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let sidecar = |name: &str| {
+            app2.shell()
+                .sidecar(name)
+                .map(std::process::Command::from)
+                .map_err(|e| format!("no se encontro el sidecar {name}: {e}"))
+        };
+        let job = export::ExportJob {
+            format,
+            markdown: &text,
+            output: &job_out,
+            doc_dir: job_dir.as_deref(),
+            css: &css,
+            accent: &accent,
+        };
+        export::export(&sidecar, &job, &work_dir)
+    })
+    .await
+    .map_err(|e| format!("error al exportar: {e}"))??;
 
-    // La hoja de estilos del preview (un `<style>` que arma el frontend) va a otro
-    // temporal: pandoc solo la acepta como ARCHIVO via --include-in-header. Solo se
-    // genera para HTML — es el unico formato que entiende CSS.
-    let header = if format == ExportFormat::Html && !css.is_empty() {
-        let path = std::env::temp_dir().join(format!(
-            "apostrophe-export-{}-{}.head.html",
-            std::process::id(),
-            seq
-        ));
-        std::fs::write(&path, css.as_bytes())
-            .map_err(|e| format!("no se pudo escribir la hoja de estilos: {e}"))?;
-        Some(path)
-    } else {
-        None
-    };
-    let header_str = header.as_ref().map(|p| p.to_string_lossy().into_owned());
-
-    // Sin esto pandoc busca `![](gato.png)` contra su directorio actual —no contra el del
-    // documento— y no la encuentra. No falla: avisa por stderr y sigue, dejando el `src`
-    // roto en HTML y la imagen FUERA del DOCX, ODT, EPUB o PDF.
-    let resource_path = doc_dir.as_ref().map(|d| d.to_string_lossy().into_owned());
-
-    let opts = ExportOptions {
-        pdf_engine: pdf_engine.as_deref(),
-        header_include: header_str.as_deref(),
-        link_color: (!accent.is_empty()).then_some(accent.as_str()),
-        resource_path: resource_path.as_deref(),
-    };
-    let mut args = vec![tmp.to_string_lossy().into_owned()];
-    args.extend(export_args(format, &out_str, &opts));
-
-    let result = run_pandoc_sidecar(&app, args).await;
-    let _ = std::fs::remove_file(&tmp);
-    if let Some(path) = header {
-        let _ = std::fs::remove_file(path);
-    }
-    result?; // pandoc escribe en --output; su stdout queda vacio
-
-    // El HTML se termina de armar aca. Los demas formatos ya incrustan la imagen dentro del
-    // archivo, pero el HTML conserva el `src` relativo, que solo funciona si el export cae
-    // justo al lado de la imagen — compartir el .html suelto lo rompe.
+    // El HTML se termina de armar aca. DOCX, ODT, EPUB y PDF ya incrustan la imagen dentro
+    // del archivo, pero el HTML conserva el `src` relativo, que solo funciona si el export
+    // cae justo al lado de la imagen — compartir el .html suelto lo rompe. (El LaTeX
+    // tambien conserva la ruta, `\includegraphics{gato.png}`: es texto fuente y se compila
+    // junto a sus imagenes, asi que se deja como esta.)
     if format == ExportFormat::Html {
         embed_html_images(&out_path, doc_dir).await?;
     }
@@ -1091,17 +1085,19 @@ async fn export_document(
 /// Leer y codificar cada imagen es I/O bloqueante: va fuera del hilo de eventos.
 async fn embed_html_images(path: &Path, doc_dir: Option<PathBuf>) -> Result<(), String> {
     let path = path.to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || {
-        let html = std::fs::read_to_string(&path)
-            .map_err(|e| format!("no se pudo releer el HTML exportado: {e}"))?;
-        let embedded = apostrophe_core::image::rewrite_img_srcs(&html, |src| {
-            image_data_uri(src, doc_dir.as_deref()).ok()
-        });
-        std::fs::write(&path, embedded)
-            .map_err(|e| format!("no se pudo escribir el HTML exportado: {e}"))
-    })
-    .await
-    .map_err(|e| format!("error al incrustar las imagenes del export: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || embed_html_images_in(&path, doc_dir.as_deref()))
+        .await
+        .map_err(|e| format!("error al incrustar las imagenes del export: {e}"))?
+}
+
+/// Cuerpo sincrono de `embed_html_images`, aparte para poder probarlo sin runtime de Tauri.
+fn embed_html_images_in(path: &Path, doc_dir: Option<&Path>) -> Result<(), String> {
+    let html = std::fs::read_to_string(path)
+        .map_err(|e| format!("no se pudo releer el HTML exportado: {e}"))?;
+    let embedded =
+        apostrophe_core::image::rewrite_img_srcs(&html, |src| image_data_uri(src, doc_dir).ok());
+    std::fs::write(path, embedded)
+        .map_err(|e| format!("no se pudo escribir el HTML exportado: {e}"))
 }
 
 // --- M6: spellcheck ---
@@ -1495,7 +1491,23 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::file_arg;
+    use super::{absolute_doc_path, file_arg};
+
+    #[test]
+    fn la_ruta_relativa_del_documento_se_vuelve_absoluta() {
+        // `apostrophe.exe nota.md` desde una terminal: sin esto la carpeta del documento
+        // seria `""` y no serviria para resolver sus imagenes ni como directorio actual.
+        let path = absolute_doc_path(std::path::PathBuf::from("nota.md"));
+        assert!(path.is_absolute(), "{path:?}");
+        assert_eq!(path.parent(), Some(std::env::current_dir().unwrap().as_path()));
+        assert_eq!(path.file_name().unwrap(), "nota.md");
+    }
+
+    #[test]
+    fn la_ruta_absoluta_del_documento_no_cambia() {
+        let original = std::env::temp_dir().join("notas").join("nota.md");
+        assert_eq!(absolute_doc_path(original.clone()), original);
+    }
 
     #[test]
     fn file_arg_devuelve_la_ruta_tras_el_exe() {
