@@ -52,7 +52,12 @@
       "nsis": {
         "installMode": "currentUser",
         "languages": ["Spanish", "SpanishInternational", "English"],
-        "displayLanguageSelector": true
+        "displayLanguageSelector": true,
+        "installerHooks": "windows/hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": ["windows/cli-path.wxs"],
+        "componentRefs": ["ElisionCliPath"]
       }
     }
   }

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fragmento WiX del MSI (`bundle.windows.wix.fragmentPaths` y `componentRefs` en
+  tauri.conf.json).
+
+  Agrega la carpeta de instalacion al final del Path del SISTEMA para que el comando
+  `elision` funcione en cualquier terminal nueva. El MSI de Tauri es perMachine
+  (InstallScope="perMachine"), por eso System="yes". Windows Installer quita la entrada
+  al desinstalar y difunde WM_SETTINGCHANGE por su cuenta.
+
+  - Part="last": se agrega al final, sin reemplazar ni reordenar las entradas previas.
+  - Actualizar no duplica: el MajorUpgrade de Tauri (afterInstallInitialize) desinstala
+    la version anterior, con su entrada, antes de instalar la nueva.
+  - El componente "Path" y la feature "PATH Environment Variable" de la plantilla de
+    Tauri no tocan la variable PATH (solo agrupan los ejecutables). Este componente
+    tiene un Id propio y no choca con ellos.
+  - Tauri lo referencia desde su feature "External" (Level 1, Absent="disallow"): se
+    instala siempre.
+  - La clave HKLM solo es el KeyPath del componente: con ella Windows Installer sabe si
+    esta instalado. "gerardofranco" es el fabricante que Tauri deduce del identifier.
+    Tauri compila con `candle -arch x64`, asi que el componente es de 64 bits y la
+    clave no cae en WOW6432Node.
+  - Tauri pasa este archivo por Handlebars (para detectar extensiones de WiX) antes de
+    compilarlo: no uses dobles llaves.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="ElisionCliPath" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\gerardofranco\elision" Name="PathEntry"
+                       Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+        <Environment Id="ElisionCliPathEntry" Name="PATH" Value="[INSTALLDIR]"
+                     Part="last" Action="set" System="yes" Permanent="no" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

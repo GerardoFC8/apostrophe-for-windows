@@ -70,5 +70,10 @@ jobs:
         env:
           ELISION_REQUIRE_SIDECARS: "1"
 
+      # Con Windows PowerShell 5.1, el mismo que usa el instalador NSIS. Trabaja sobre una
+      # clave temporal de HKCU: no toca el Path real del runner.
+      - name: Script del Path del instalador NSIS
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/windows/elision-path.tests.ps1
+
       - name: Clippy sin warnings
         run: cargo clippy --all-targets -- -D warnings
