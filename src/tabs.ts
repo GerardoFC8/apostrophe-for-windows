@@ -221,8 +221,8 @@ export function setTabText(tab: Tab, text: string): void {
   tab.parked = { state: replaceStateText(tab.parked.state, text), scroll: null };
 }
 
-/// Reemplaza el documento entero por uno NUEVO (historial vacio): abrir un archivo dentro
-/// de una pestaña en blanco o restaurar un snapshot. Deshacer no debe volver a lo anterior.
+/// Reemplaza el documento entero por uno NUEVO (historial vacío), por ejemplo al restaurar
+/// un snapshot. Deshacer no debe volver a lo anterior.
 export function resetTab(tab: Tab, text: string): void {
   const parked: ParkedEditor = { state: createDocState(text), scroll: null };
   if (tab.parked) tab.parked = parked;

@@ -286,7 +286,11 @@ async function discardBlankTab(id: DocId): Promise<void> {
       labels: closeTabLabels(tabDisplayName(tab)),
       text: tabText(tab),
     });
-    if (closed) removeTab(id);
+    if (!closed) return;
+    // Si el usuario la activó mientras close_document estaba en vuelo, hay que activar
+    // otra: sin pestaña activa, lo que escriba se perdería en silencio.
+    const { next, wasActive } = removeTab(id);
+    if (wasActive && next !== null) activateTab(next);
   } catch {
     /* no critico: queda una pestaña vacia de mas */
   }

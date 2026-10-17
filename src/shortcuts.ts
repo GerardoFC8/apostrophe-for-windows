@@ -9,8 +9,9 @@ import { cycleViewMode } from "./preview";
 import { applyFullscreen, toggleFocusMode, toggleHemingway, toggleSpellcheck } from "./writing-modes";
 
 // M4/M5: atajos de archivo a nivel WINDOW (no solo en CM6) — asi funcionan aunque el
-// foco NO este en el editor. Shift+S se chequea ANTES que S sola. Ctrl+O abre en una
-// pestaña nueva (o en la activa si esta en blanco; ver document-session.ts).
+// foco NO este en el editor. Shift+S se chequea ANTES que S sola. Ctrl+O abre siempre en
+// una pestaña nueva; si la de partida quedó en blanco, se descarta después (ver
+// document-session.ts).
 export function initFileShortcuts(): void {
   window.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;

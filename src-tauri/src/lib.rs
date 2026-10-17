@@ -1722,7 +1722,8 @@ pub fn run() {
             load_dictionary(app.handle()); // carga el diccionario es en background
 
             // M8.4a: restauracion de crash. Detectar los snapshots huerfanos de la sesion
-            // anterior ANTES de procesar argv (el pending file tiene precedencia).
+            // anterior ANTES de procesar argv. Se conservan aunque lleguen archivos: el
+            // frontend abre los archivos primero y lo recuperado en pestañas aparte.
             if let Ok(dir) = snapshots_dir(app.handle()) {
                 *app.state::<PendingRestore>().0.lock().unwrap() = find_orphans(&dir);
                 // Barrer TODOS los snapshots y metadatos del arranque anterior (incluyendo
@@ -1736,8 +1737,8 @@ pub fn run() {
             // rutas en argv; las cargamos en el workspace y las dejamos pendientes para que
             // el frontend las muestre al iniciar. La primera ocupa el documento vacio
             // inicial y las demas se abren aparte; la primera queda activa. Una ruta que
-            // falla (invalida) se ignora. Los pending files tienen PRECEDENCIA sobre el
-            // restore.
+            // falla (invalida) se ignora. El restore no se descarta: convive con estos
+            // archivos en pestañas propias.
             let argv: Vec<String> = std::env::args().collect();
             let docs = app.state::<Docs>();
             let initial = docs.lock().unwrap().active();
