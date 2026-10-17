@@ -71,7 +71,7 @@ const focusDimField = StateField.define<DecorationSet>({
 const focusDimExtension: Extension = [focusDimField];
 
 // Compartment para activar/desactivar el atenuado en caliente, sin recrear el EditorView
-// (mismo mecanismo que usa main.ts para el filtro de Hemingway).
+// (mismo mecanismo que usa hemingway.ts para su filtro).
 export const focusCompartment = new Compartment();
 
 /** Activa el atenuado por parrafo (reconfigura el compartment con la extension). */

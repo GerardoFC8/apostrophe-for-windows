@@ -414,7 +414,7 @@ export function getLocale(): Locale {
 }
 
 /// Fija el idioma activo. No re-renderiza por si mismo: quien llama decide cuando aplicar
-/// (ver `applyTranslations` en main.ts), para hacer un unico repintado.
+/// (ver `applyTranslations` en language.ts), para hacer un unico repintado.
 export function setLocale(locale: Locale): void {
   current = locale;
   document.documentElement.lang = locale;

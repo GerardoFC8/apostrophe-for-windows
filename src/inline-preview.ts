@@ -18,7 +18,7 @@ type InlineTarget =
   | { kind: "footnote"; id: string; body: string }
   | { kind: "math"; source: string };
 
-/// Etiquetas del popover. Las inyecta main.ts desde el catálogo de i18n: este módulo no
+/// Etiquetas del popover. Las inyecta editor.ts desde el catálogo de i18n: este módulo no
 /// importa i18n para no acoplar la extensión del editor al idioma (mismo criterio que
 /// spellcheck.ts con sus sugerencias).
 export interface InlineLabels {
@@ -30,7 +30,7 @@ export interface InlineLabels {
   /// Color con el que se dibuja la fórmula. Sale de la paleta del tema activo: typst pinta
   /// en negro por defecto, que en tema oscuro sería una fórmula invisible.
   mathColor: string;
-  /// Por qué no se pudo mostrar una imagen, por código. Rust manda el código y main.ts lo
+  /// Por qué no se pudo mostrar una imagen, por código. Rust manda el código y editor.ts lo
   /// traduce: la ruta sola dice DÓNDE mirar, no QUÉ está mal.
   imageProblem: Record<ImageProblem, string>;
 }
