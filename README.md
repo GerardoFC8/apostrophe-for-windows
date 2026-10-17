@@ -12,12 +12,59 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
 - Editor CodeMirror 6 con titlebar Fluent custom.
 - Vista previa en vivo vía **pandoc** (bundleado como sidecar, sin dependencias del sistema).
 - Abrir / guardar `.md` con diálogos nativos.
+- Varios documentos abiertos a la vez, cada uno en su pestaña (ver [Pestañas](#pestañas)).
 - Temas claro / oscuro / sepia.
 - Exportación a **PDF, HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en
   el desplegable "Guardar como tipo" del diálogo. Lo resuelven los sidecars bundleados
   (pandoc y typst): no necesitas instalar nada más.
 - Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
 - CLI `elision` para agentes de IA y scripts (ver [CLI para agentes](#cli-para-agentes-elision)).
+
+## Pestañas
+
+Cada documento Markdown se abre en su propia pestaña, y puedes tener varios abiertos a la vez.
+
+> **Cambio de atajo:** el modo Hemingway pasó de `Ctrl+T` a **`Ctrl+Shift+H`**. `Ctrl+T`
+> ahora abre una pestaña nueva, como en cualquier programa con pestañas.
+
+| Atajo | Acción |
+|---|---|
+| `Ctrl+T` o `Ctrl+N` | Pestaña nueva con un documento sin título |
+| `Ctrl+W` | Cerrar la pestaña activa |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Pestaña siguiente / anterior |
+| `Ctrl+Shift+H` | Modo Hemingway |
+
+**Barra de pestañas**
+
+- **●** marca los documentos con cambios sin guardar.
+- Al pasar el mouse sobre una pestaña se ve la ruta completa del archivo.
+- Para cerrar una pestaña: la **×**, el clic central, `Ctrl+W` o `Supr` con la pestaña
+  enfocada. Si tiene cambios, se pide confirmación.
+- Con muchas pestañas, la barra se desplaza en horizontal (también con la rueda del mouse).
+
+**Abrir archivos**
+
+- `Ctrl+O`, los recientes, el doble clic sobre un `.md` y `elision open a.md b.md` abren cada
+  archivo en su propia pestaña.
+- Si el archivo ya está abierto, solo se activa su pestaña.
+- La pestaña inicial sin título y vacía se reemplaza por el archivo que abres.
+
+**Qué guarda cada pestaña y qué es común**
+
+| Por pestaña | Común a todas |
+|---|---|
+| Historial de deshacer, cursor y desplazamiento | Modos de escritura: enfoque, Hemingway y vista |
+
+La vista previa (también la ventana desacoplada) y las estadísticas siguen a la pestaña activa.
+
+**Cierre y recuperación**
+
+- Al cerrar la ventana con varios documentos sin guardar, se pregunta **una sola vez** e
+  indica cuántos tienen cambios.
+- Tras un cierre inesperado, cada documento se recupera en su propia pestaña, también si
+  abres la app con un archivo.
+- "Guardar como" sobre un archivo que ya está abierto en otra pestaña se rechaza con un aviso:
+  cierra esa pestaña o elige otro nombre.
 
 ## Instalación
 
@@ -72,7 +119,7 @@ elision export notas.md -o notas.pdf
 | `stats <in>` | Caracteres, palabras, oraciones, párrafos y tiempo de lectura. | — |
 | `tables <in> [--check \| --write]` | Revisa (por defecto) o reescribe la alineación de todas las tablas. | hay tablas desalineadas (solo `--check`) |
 | `spell <in> [--dict-dir <dir>]` | Ortografía en español, con línea y columna (base 1). | hay errores |
-| `open <archivos>...` | Abre los archivos en el editor sin esperar a que se cierre. | — |
+| `open <archivos>...` | Abre cada archivo en su propia pestaña del editor, sin esperar a que se cierre. | — |
 
 - **Entrada estándar:** `<in>` puede ser `-` (salvo con `tables --write`). Se decodifica igual
   que un archivo: UTF-8 u otra codificación que la app sepa abrir. Con `-`, `export` no tiene
@@ -139,8 +186,6 @@ elision export docs\capitulo.md -o C:\salida\capitulo.pdf --json
   y como aviso en stderr; no cambian el código de salida.
 - **HTML sin tema:** el export a HTML usa el estilo por defecto de pandoc, no el tema de la
   app.
-- **`open` con varios archivos:** los pasa todos, pero por ahora el editor abre solo el
-  primero (lo avisa en stderr).
 - **Sin firma:** `elision.exe` tampoco está firmado. Algunos antivirus desconfían de
   ejecutables nuevos sin firma y pueden bloquearlo o ponerlo en cuarentena; si pasa, agrega
   una excepción para la carpeta de instalación.
@@ -204,9 +249,9 @@ Definida en `src-tauri/tauri.conf.json` (`bundle`):
 - **`installMode: "currentUser"`** — instala por usuario, sin pedir permisos de
   administrador (UAC). Para distribución por-máquina, cambiar a `"perMachine"`.
 - **Idiomas del instalador**: español (con selector de idioma).
-- **Asociación de archivos `.md` / `.markdown`** — declarada en el instalador. El
-  comportamiento de "abrir con doble-click" se implementa en un slice aparte
-  (requiere `tauri-plugin-single-instance` y se prueba en Windows).
+- **Asociación de archivos `.md` / `.markdown`** — declarada en el instalador. El doble
+  clic abre el archivo en una pestaña; si la app ya está abierta, `tauri-plugin-single-instance`
+  le reenvía la ruta en lugar de abrir otra ventana.
 - **`elision` en el PATH** — el instalador NSIS agrega la carpeta de instalación al final
   del `Path` de tu usuario (`src-tauri/windows/hooks.nsh`, que ejecuta `elision-path.ps1`);
   el MSI, al final del `Path` del sistema (`src-tauri/windows/cli-path.wxs`). Al desinstalar

@@ -7,20 +7,67 @@ A native port of GNOME's [Apostrophe](https://gitlab.gnome.org/World/apostrophe)
 with **Tauri 2 + Rust** on a hexagonal architecture
 (see [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
 
-> The application interface is in Spanish. This document is the English translation of
-> the project README.
+> The application interface is available in Spanish and English. This document is the
+> English translation of the project README.
 
 ## Features
 
 - CodeMirror 6 editor with a custom Fluent title bar.
 - Live preview via **pandoc** (bundled as a sidecar — no system dependencies).
 - Open and save `.md` through native dialogs.
+- Several documents open at once, each in its own tab (see [Tabs](#tabs)).
 - Light, dark and sepia themes.
 - Export to **PDF, HTML, ODT, DOCX, EPUB and LaTeX** (Ctrl+E) — pick the format from the
   dialog's "Save as type" dropdown. The bundled sidecars (pandoc and typst) handle
   everything: nothing else to install.
 - Spanish spell checking (Hunspell via `spellbook`, pure Rust).
 - `elision` CLI for AI agents and scripts (see [CLI for agents](#cli-for-agents-elision)).
+
+## Tabs
+
+Each Markdown document opens in its own tab, and you can keep several open at once.
+
+> **Shortcut change:** Hemingway mode moved from `Ctrl+T` to **`Ctrl+Shift+H`**. `Ctrl+T`
+> now opens a new tab, as in any tabbed program.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+T` or `Ctrl+N` | New tab with an untitled document |
+| `Ctrl+W` | Close the active tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Shift+H` | Hemingway mode |
+
+**Tab bar**
+
+- **●** marks documents with unsaved changes.
+- Hovering over a tab shows the file's full path.
+- To close a tab: the **×**, a middle click, `Ctrl+W`, or `Delete` with the tab focused. If
+  it has changes, you are asked to confirm.
+- With many tabs, the bar scrolls horizontally (the mouse wheel works too).
+
+**Opening files**
+
+- `Ctrl+O`, recent files, double-clicking a `.md`, and `elision open a.md b.md` open each
+  file in its own tab.
+- If the file is already open, its tab is simply activated.
+- The initial empty untitled tab is replaced by the file you open.
+
+**What each tab keeps and what is shared**
+
+| Per tab | Shared by all tabs |
+|---|---|
+| Undo history, cursor and scroll position | Writing modes: focus, Hemingway and view |
+
+The preview (including the detached window) and the statistics follow the active tab.
+
+**Closing and recovery**
+
+- Closing the window with several unsaved documents asks **only once** and says how many
+  have changes.
+- After a crash, every document is recovered in its own tab, even when you launch the app by
+  opening a file.
+- "Save as" onto a file that is already open in another tab is refused with a notice: close
+  that tab or choose another name.
 
 ## Installation
 
@@ -75,7 +122,7 @@ elision export notes.md -o notes.pdf
 | `stats <in>` | Characters, words, sentences, paragraphs and reading time. | — |
 | `tables <in> [--check \| --write]` | Checks (the default) or rewrites the alignment of every table. | there are misaligned tables (`--check` only) |
 | `spell <in> [--dict-dir <dir>]` | Spanish spelling, with line and column (1-based). | there are misspellings |
-| `open <files>...` | Opens the files in the editor without waiting for it to close. | — |
+| `open <files>...` | Opens each file in its own editor tab, without waiting for the editor to close. | — |
 
 - **Standard input:** `<in>` can be `-` (except with `tables --write`). It is decoded like a
   file: UTF-8 or any other encoding the app can open. With `-`, `export` has no document
@@ -141,8 +188,6 @@ elision export docs\chapter.md -o C:\out\chapter.pdf --json
   They are listed in the JSON `skipped` field (`escaped_pipe`, `extra_cells`, `mixed_indent`,
   `blockquote`) and as a warning on stderr; they do not change the exit code.
 - **HTML without a theme:** HTML export uses pandoc's default style, not the app's theme.
-- **`open` with several files:** it passes them all, but for now the editor opens only the
-  first one (it warns on stderr).
 - **Unsigned:** `elision.exe` is not signed either. Some antivirus products distrust new
   unsigned executables and may block or quarantine it; if that happens, add an exception for
   the installation folder.
@@ -208,7 +253,9 @@ Defined in `src-tauri/tauri.conf.json` (`bundle`):
 - **`installMode: "currentUser"`** — installs per user, without asking for administrator
   rights (UAC). For per-machine distribution, change it to `"perMachine"`.
 - **Installer languages**: Spanish (with a language selector).
-- **`.md` / `.markdown` file association** — declared in the installer.
+- **`.md` / `.markdown` file association** — declared in the installer. Double-clicking
+  opens the file in a tab; if the app is already open, `tauri-plugin-single-instance`
+  forwards the path to it instead of opening another window.
 - **`elision` on the PATH** — the NSIS installer appends the installation folder to your
   user `Path` (`src-tauri/windows/hooks.nsh`, which runs `elision-path.ps1`); the MSI
   appends it to the system `Path` (`src-tauri/windows/cli-path.wxs`). Uninstalling removes
