@@ -191,12 +191,38 @@ pub struct TableSpan {
     pub aligned: bool,
 }
 
-/// Resultado de [`align_tables`]: el documento con todas sus tablas alineadas y una
-/// entrada por tabla, en orden de aparicion.
+/// Por que [`align_tables`] dejo una tabla como estaba.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// Lleva una barra escapada (`\|`): partir por las barras cambiaria sus celdas.
+    EscapedPipe,
+    /// Una fila tiene mas celdas que el encabezado: alinearla las perderia.
+    ExtraCells,
+    /// Sus lineas no tienen la misma sangria: elegir una seria decidir por el autor.
+    MixedIndent,
+    /// Esta dentro de una cita (`>`): habria que conservar los marcadores de cada linea.
+    Blockquote,
+}
+
+/// Una tabla que [`align_tables`] encontro pero no toco, porque alinearla podria
+/// estropear el documento.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedTable {
+    /// Linea del encabezado, base 1.
+    pub line: usize,
+    pub reason: SkipReason,
+}
+
+/// Resultado de [`align_tables`]: el documento con todas sus tablas alineadas, una
+/// entrada por tabla alineada y otra por tabla omitida, en orden de aparicion.
+///
+/// Las omitidas se informan aparte para que quien verifica no las de por buenas en
+/// silencio: no estan alineadas, pero `align_tables` tampoco puede arreglarlas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlignedTables {
     pub text: String,
     pub tables: Vec<TableSpan>,
+    pub skipped: Vec<SkippedTable>,
 }
 
 /// Alinea TODAS las tablas pipe de un documento y deja intacto el resto del texto.
@@ -207,10 +233,16 @@ pub struct AlignedTables {
 ///
 /// Es idempotente y, si ninguna tabla cambia, `text` es identico a `doc` byte a byte: quien
 /// llama puede comparar para decidir si hace falta reescribir el archivo.
+///
+/// Las tablas que no puede alinear sin estropearlas (ver [`SkipReason`]) quedan intactas y
+/// se informan en `skipped`, no en `tables`.
 pub fn align_tables(doc: &str) -> AlignedTables {
     let lines: Vec<Line> = doc.split_inclusive('\n').map(Line::new).collect();
-    let mut text = String::with_capacity(doc.len());
-    let mut tables = Vec::new();
+    let mut out = AlignedTables {
+        text: String::with_capacity(doc.len()),
+        tables: Vec::new(),
+        skipped: Vec::new(),
+    };
     let mut fence: Option<Fence> = None;
 
     let mut i = 0;
@@ -227,15 +259,15 @@ pub fn align_tables(doc: &str) -> AlignedTables {
             let end = (i..lines.len())
                 .find(|&j| !is_table_candidate(lines[j].content))
                 .unwrap_or(lines.len());
-            align_block(&lines[i..end], i + 1, &mut text, &mut tables);
+            align_block(&lines[i..end], i + 1, &mut out);
             i = end;
             continue;
         }
-        line.push_to(&mut text);
+        line.push_to(&mut out.text);
         i += 1;
     }
 
-    AlignedTables { text, tables }
+    out
 }
 
 /// Una linea del documento separada de su salto (`"\n"`, `"\r\n"` o nada al final).
@@ -320,50 +352,91 @@ fn is_separator_row(content: &str) -> bool {
 /// El encabezado es la linea que precede al PRIMER separador, como en GFM: sin una linea
 /// vacia de por medio, una linea de prosa con barras queda en el mismo bloque y no debe
 /// esconder la tabla. Lo que va antes del encabezado es prosa y se copia tal cual, igual
-/// que el bloque entero si no es una tabla o no se puede alinear sin inventar nada.
-fn align_block(block: &[Line], first_line: usize, text: &mut String, tables: &mut Vec<TableSpan>) {
-    let header = (1..block.len())
-        .find(|&j| is_separator_row(block[j].content))
-        .map(|j| j - 1);
-    let Some((prose, table)) = header.map(|h| block.split_at(h)) else {
-        block.iter().for_each(|l| l.push_to(text));
+/// que el bloque entero si no es una tabla o no se puede alinear sin inventar nada (en
+/// ese caso, se anota como omitida).
+fn align_block(block: &[Line], first_line: usize, out: &mut AlignedTables) {
+    let copy = |lines: &[Line], text: &mut String| lines.iter().for_each(|l| l.push_to(text));
+    let Some(header) = header_index(block, |content| Some(content)) else {
+        // Sin separador visible puede ser una tabla dentro de una cita: no se toca, pero
+        // se avisa.
+        if let Some(header) = header_index(block, unquoted) {
+            out.skipped.push(SkippedTable {
+                line: first_line + header,
+                reason: SkipReason::Blockquote,
+            });
+        }
+        copy(block, &mut out.text);
         return;
     };
-    prose.iter().for_each(|l| l.push_to(text));
+    let (prose, table) = block.split_at(header);
+    copy(prose, &mut out.text);
+    let line = first_line + header;
     match realign(table) {
-        Some(rebuilt) => {
+        Ok(Some(rebuilt)) => {
             let mut original = String::new();
-            table.iter().for_each(|l| l.push_to(&mut original));
-            tables.push(TableSpan {
-                line: first_line + prose.len(),
+            copy(table, &mut original);
+            out.tables.push(TableSpan {
+                line,
                 aligned: rebuilt == original,
             });
-            text.push_str(&rebuilt);
+            out.text.push_str(&rebuilt);
         }
-        None => table.iter().for_each(|l| l.push_to(text)),
+        Ok(None) => copy(table, &mut out.text),
+        Err(reason) => {
+            out.skipped.push(SkippedTable { line, reason });
+            copy(table, &mut out.text);
+        }
     }
+}
+
+/// Indice del encabezado: la linea anterior al primer separador del bloque, mirando el
+/// contenido que deja `view` (`None` = la linea no cuenta).
+fn header_index(block: &[Line], view: impl Fn(&str) -> Option<&str>) -> Option<usize> {
+    (1..block.len())
+        .find(|&j| view(block[j].content).is_some_and(is_separator_row))
+        .filter(|&j| view(block[j - 1].content).is_some())
+        .map(|j| j - 1)
+}
+
+/// Contenido de una linea de cita sin sus marcadores (`>`, `> >`…); `None` si no es cita.
+fn unquoted(content: &str) -> Option<&str> {
+    let rest = content.trim_start().strip_prefix('>')?;
+    Some(rest.trim_start_matches(['>', ' ']))
 }
 
 /// La tabla alineada, con la sangria comun y el salto de cada linea originales.
 ///
-/// `None` si no es una tabla, si la sangria no es la misma en todas las lineas (elegir una
-/// seria decidir por el autor) o si alinearla perderia contenido.
-fn realign(table: &[Line]) -> Option<String> {
-    let indent = table_indent(table[0].content)?;
+/// `Ok(None)` si no es una tabla (el separador no tiene tantas celdas como el encabezado)
+/// y `Err` si lo es pero alinearla podria estropearla.
+fn realign(table: &[Line]) -> Result<Option<String>, SkipReason> {
+    // La barra escapada va primero: con ella, contar celdas partiendo por todas las barras
+    // ya no dice nada, ni siquiera si es una tabla.
+    if table.iter().any(|l| l.content.contains("\\|")) {
+        return Err(SkipReason::EscapedPipe);
+    }
+    let columns = cells(table[0].content).len();
+    if cells(table[1].content).len() != columns {
+        return Ok(None);
+    }
+    // `is_table_candidate` ya garantizo que ninguna linea es codigo indentado.
+    let indent = table_indent(table[0].content).unwrap_or_default();
     if table
         .iter()
         .any(|l| table_indent(l.content) != Some(indent))
     {
-        return None;
+        return Err(SkipReason::MixedIndent);
     }
-    if would_lose_content(table) {
-        return None;
+    // `align_table` dibuja solo las columnas del encabezado: perderia las de mas.
+    if table.iter().any(|l| cells(l.content).len() > columns) {
+        return Err(SkipReason::ExtraCells);
     }
     let body: Vec<&str> = table.iter().map(|l| &l.content[indent.len()..]).collect();
-    let aligned = align_table(&body.join("\n"))?;
+    let Some(aligned) = align_table(&body.join("\n")) else {
+        return Ok(None);
+    };
     // `align_table` devuelve una linea por cada linea no vacia; si no, mejor no tocar nada.
     if aligned.lines().count() != table.len() {
-        return None;
+        return Ok(None);
     }
     let mut out = String::new();
     for (line, new) in table.iter().zip(aligned.lines()) {
@@ -371,17 +444,7 @@ fn realign(table: &[Line]) -> Option<String> {
         out.push_str(new);
         out.push_str(line.ending);
     }
-    Some(out)
-}
-
-/// `true` si `align_table` estropearia la tabla: parte por TODAS las barras, asi que una
-/// barra escapada (`\|`) quedaria partida en dos celdas, y dibuja solo las columnas del
-/// encabezado, asi que una fila con celdas de mas las perderia.
-fn would_lose_content(table: &[Line]) -> bool {
-    let columns = cells(table[0].content).len();
-    table
-        .iter()
-        .any(|l| l.content.contains("\\|") || cells(l.content).len() > columns)
+    Ok(Some(out))
 }
 
 #[cfg(test)]
@@ -676,5 +739,77 @@ mod tests {
         let result = align_tables(doc);
         assert_eq!(result.text, doc);
         assert!(result.tables.is_empty());
+        assert!(
+            result.skipped.is_empty(),
+            "no es una tabla: no se omite nada"
+        );
+    }
+
+    // --- tablas omitidas: se dejan como estan, pero se avisa ---
+
+    /// Atajo para comparar las omitidas: `(linea, motivo)`.
+    fn skipped(result: &AlignedTables) -> Vec<(usize, SkipReason)> {
+        result.skipped.iter().map(|s| (s.line, s.reason)).collect()
+    }
+
+    #[test]
+    fn una_tabla_que_no_se_puede_alinear_se_reporta_como_omitida() {
+        // Quien verifica (`tables --check`) no puede darlas por alineadas en silencio: un
+        // agente creeria que el documento esta bien, o reintentaria un `--write` que no
+        // las arregla. Se dejan intactas y se informan aparte, con su motivo.
+        for (doc, reason) in [
+            (
+                "| a | b |\n|---|---|\n| x \\| y | z |\n",
+                SkipReason::EscapedPipe,
+            ),
+            (
+                "| a | b |\n|---|---|\n| 1 | 2 | 3 |\n",
+                SkipReason::ExtraCells,
+            ),
+            (" | a | bb |\n|---|---|\n", SkipReason::MixedIndent),
+            (
+                "> | a | bb |\n> |---|---|\n> | c | d |\n",
+                SkipReason::Blockquote,
+            ),
+        ] {
+            let result = align_tables(doc);
+            assert_eq!(result.text, doc);
+            assert!(result.tables.is_empty(), "{doc:?}");
+            assert_eq!(skipped(&result), [(1, reason)], "{doc:?}");
+        }
+    }
+
+    #[test]
+    fn una_barra_escapada_en_el_encabezado_tambien_omite_la_tabla() {
+        // Sin el escape, el encabezado tendria tantas celdas como el separador: es una
+        // tabla, y contar las barras a ciegas la haria pasar por texto.
+        let doc = "| a \\| b | c |\n|---|---|\n";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert_eq!(skipped(&result), [(1, SkipReason::EscapedPipe)]);
+    }
+
+    #[test]
+    fn las_omitidas_llevan_la_linea_de_su_encabezado_y_no_tapan_a_las_demas() {
+        let doc = "Intro\n\n| a | b |\n|---|---|\n| 1 | 2 | 3 |\n\nprosa | barra\n\
+                   > | c | d |\n> |---|---|\n\n| e | ff |\n|---|---|\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            doc.replace("| e | ff |\n|---|---|\n", "| e   | ff  |\n| --- | --- |\n")
+        );
+        assert_eq!(spans(&result), [(11, false)]);
+        assert_eq!(
+            skipped(&result),
+            [(3, SkipReason::ExtraCells), (8, SkipReason::Blockquote)]
+        );
+    }
+
+    #[test]
+    fn una_cita_con_barras_que_no_es_tabla_no_se_reporta() {
+        let doc = "> uno | dos\n> tres | cuatro\n";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert!(result.skipped.is_empty());
     }
 }
