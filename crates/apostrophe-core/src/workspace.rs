@@ -107,7 +107,7 @@ impl Workspace {
         path: PathBuf,
         content: String,
     ) -> Option<Opened> {
-        if let Some(other) = self.find_by_path(&path).filter(|&id| id != target) {
+        if let Some(other) = self.other_with_path(Some(target), &path) {
             self.active = Some(other);
             return Some(Opened {
                 id: other,
@@ -174,6 +174,17 @@ impl Workspace {
     pub fn find_by_path(&self, path: &Path) -> Option<DocId> {
         self.docs
             .iter()
+            .find(|e| e.store.path().is_some_and(|p| same_document_path(p, path)))
+            .map(|e| e.id)
+    }
+
+    /// Documento abierto en `path` que NO sea `except`, si lo hay. Sirve para saber si
+    /// una ruta ya la tiene OTRA pestaña: al abrirla se activa esa, y guardar como sobre
+    /// ella se rechaza (dos documentos con la misma ruta se pisarian al guardar).
+    pub fn other_with_path(&self, except: Option<DocId>, path: &Path) -> Option<DocId> {
+        self.docs
+            .iter()
+            .filter(|e| Some(e.id) != except)
             .find(|e| e.store.path().is_some_and(|p| same_document_path(p, path)))
             .map(|e| e.id)
     }
@@ -368,6 +379,23 @@ mod tests {
         let mut ws = Workspace::new();
         assert_eq!(ws.open_path_into(42, p("/docs/a.md"), "A".into()), None);
         assert!(ws.is_empty());
+    }
+
+    #[test]
+    fn other_with_path_encuentra_la_ruta_en_otro_documento() {
+        let mut ws = Workspace::new();
+        let a = ws.open_path(p("/docs/a.md"), "A".into()).id;
+        let b = ws.create_untitled();
+        assert_eq!(ws.other_with_path(Some(b), &p("/Docs/A.md")), Some(a));
+        assert_eq!(ws.other_with_path(None, &p("/docs/a.md")), Some(a));
+    }
+
+    #[test]
+    fn other_with_path_ignora_al_propio_documento() {
+        let mut ws = Workspace::new();
+        let a = ws.open_path(p("/docs/a.md"), "A".into()).id;
+        assert_eq!(ws.other_with_path(Some(a), &p("/docs/a.md")), None);
+        assert_eq!(ws.other_with_path(Some(a), &p("/docs/b.md")), None);
     }
 
     #[test]
