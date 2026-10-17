@@ -601,14 +601,24 @@ fn real_sidecars() -> Option<PathBuf> {
     for name in ["pandoc", "typst"] {
         let path = apostrophe_sidecars::sidecar_path_in(&dir, name);
         if !path.exists() {
-            eprintln!(
-                "SALTADO: falta el sidecar {name} en {}. Ejecuta scripts/fetch-{name}.ps1.",
+            skip(&format!(
+                "falta el sidecar {name} en {}. Ejecuta scripts/fetch-{name}.ps1.",
                 path.display()
-            );
+            ));
             return None;
         }
     }
     Some(dir)
+}
+
+/// Avisa que el test se salta porque falta un sidecar. Con `ELISION_REQUIRE_SIDECARS`
+/// definida (la CI la define, porque ahi siempre los provisiona) falla en su lugar: un
+/// salto silencioso escondería una regresión.
+fn skip(reason: &str) {
+    if std::env::var_os("ELISION_REQUIRE_SIDECARS").is_some() {
+        panic!("{reason} ELISION_REQUIRE_SIDECARS exige que exista.");
+    }
+    eprintln!("SALTADO: {reason}");
 }
 
 #[cfg(unix)]

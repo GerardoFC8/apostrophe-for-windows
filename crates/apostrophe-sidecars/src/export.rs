@@ -234,10 +234,16 @@ mod tests {
         for name in ["pandoc", "typst"] {
             let path = crate::sidecar_path_in(&dir, name);
             if !path.exists() {
-                eprintln!(
-                    "SALTADO: falta el sidecar {name} en {}. Ejecuta scripts/fetch-{name}.ps1.",
+                let reason = format!(
+                    "falta el sidecar {name} en {}. Ejecuta scripts/fetch-{name}.ps1.",
                     path.display()
                 );
+                // La CI define ELISION_REQUIRE_SIDECARS porque ahi siempre los provisiona:
+                // un salto silencioso esconderia una regresion.
+                if std::env::var_os("ELISION_REQUIRE_SIDECARS").is_some() {
+                    panic!("{reason} ELISION_REQUIRE_SIDECARS exige que exista.");
+                }
+                eprintln!("SALTADO: {reason}");
                 return None;
             }
         }

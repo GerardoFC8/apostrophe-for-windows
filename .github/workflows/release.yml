@@ -72,6 +72,10 @@ jobs:
           pnpm exec tsc --noEmit
           cargo test --workspace
           cargo clippy --all-targets -- -D warnings
+        # Igual que en CI: si falta un sidecar o un diccionario, los tests fallan en vez
+        # de saltarse en silencio.
+        env:
+          ELISION_REQUIRE_SIDECARS: "1"
 
       - name: Compilar instaladores
         run: pnpm tauri build

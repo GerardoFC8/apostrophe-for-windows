@@ -63,8 +63,12 @@ jobs:
       - name: Typecheck del frontend
         run: pnpm exec tsc --noEmit
 
+      # Aquí los sidecars y los diccionarios siempre se provisionan: si falta alguno, los
+      # tests que los usan deben fallar en vez de saltarse en silencio.
       - name: Tests del workspace
         run: cargo test --workspace
+        env:
+          ELISION_REQUIRE_SIDECARS: "1"
 
       - name: Clippy sin warnings
         run: cargo clippy --all-targets -- -D warnings

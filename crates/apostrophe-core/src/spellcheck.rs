@@ -438,7 +438,16 @@ mod tests {
         let (Ok(aff), Ok(dic)) =
             (std::fs::read_to_string(aff_p), std::fs::read_to_string(dic_p))
         else {
-            eprintln!("diccionario es no provisionado: se saltea el test de integracion");
+            // La CI define ELISION_REQUIRE_SIDECARS porque ahi siempre lo provisiona: un
+            // salto silencioso esconderia una regresion.
+            if std::env::var_os("ELISION_REQUIRE_SIDECARS").is_some() {
+                panic!(
+                    "diccionario es no provisionado; ELISION_REQUIRE_SIDECARS exige que exista."
+                );
+            }
+            eprintln!(
+                "SALTADO: diccionario es no provisionado. Ejecuta scripts/fetch-dictionaries.ps1."
+            );
             return;
         };
         let dict = SpellbookDictionary::load(&aff, &dic).expect("cargar es dict");
