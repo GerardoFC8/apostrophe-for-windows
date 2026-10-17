@@ -69,9 +69,12 @@ impl Scratch {
         Self(dir)
     }
 
-    /// Escribe `content` en `rel` y devuelve la ruta absoluta.
+    /// Escribe `content` en `rel` (separado con `/`) y devuelve la ruta absoluta, con el
+    /// separador de la plataforma, como la informa la CLI.
     fn file(&self, rel: &str, content: impl AsRef<[u8]>) -> PathBuf {
-        let path = self.0.join(rel);
+        let path = rel
+            .split('/')
+            .fold(self.0.clone(), |path, part| path.join(part));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
         path

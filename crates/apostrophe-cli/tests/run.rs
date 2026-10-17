@@ -126,9 +126,12 @@ impl Fixture {
         }
     }
 
-    /// Escribe `content` en `rel`, relativo al directorio de trabajo, y devuelve la ruta.
+    /// Escribe `content` en `rel` (separado con `/`), relativo al directorio de trabajo, y
+    /// devuelve la ruta con el separador de la plataforma, como la informa la CLI.
     fn file(&self, rel: &str, content: impl AsRef<[u8]>) -> PathBuf {
-        let path = self.cwd.join(rel);
+        let path = rel
+            .split('/')
+            .fold(self.cwd.clone(), |path, part| path.join(part));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
         path
@@ -1076,4 +1079,66 @@ fn un_fallo_al_arrancar_sigue_el_contrato_de_errores() {
     assert_eq!(json.json()["error"]["code"], "io_error");
     let after = startup(&["stats", "--", "--json"], &error);
     assert_eq!(after.stdout, "");
+}
+
+// --- rutas normalizadas ---
+
+#[test]
+fn las_rutas_que_informa_la_cli_salen_normalizadas() {
+    // `Path` compara por componentes y daria por iguales `notas/./doc.md` y `notas/doc.md`:
+    // aqui se compara el texto, que es lo que lee un agente.
+    let mut fx = fixture("normalized");
+    let doc = fx.file("notas/doc.md", "uno dos");
+    let expected = doc.to_string_lossy().into_owned();
+
+    let stats = fx.run(&["stats", "notas/./doc.md", "--json"]);
+    assert_eq!(stats.json()["file"], expected.as_str());
+
+    let export = fx.run(&[
+        "export",
+        "notas/doc.md",
+        "-o",
+        "no-existe/./a.html",
+        "--json",
+    ]);
+    assert_eq!(export.code, 5);
+    let message = export.json()["error"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let output = fx.cwd.join("no-existe").join("a.html");
+    assert!(
+        message.starts_with(&format!("cannot write {}: ", output.display())),
+        "{message}"
+    );
+
+    fake_gui(&fx);
+    let open = fx.run(&["open", "notas/./doc.md", "--json"]);
+    assert_eq!(open.code, 0, "{}", open.stdout);
+    assert_eq!(open.json()["files"], serde_json::json!([expected]));
+    let launched = fx.launches.borrow()[0].1[0].to_string_lossy().into_owned();
+    assert_eq!(launched, expected);
+
+    // `--dict-dir` y la variable del diccionario, igual.
+    let dict = fx.cwd.join("dicts").join("es").join("es.aff");
+    for (flag, var) in [(true, false), (false, true)] {
+        fx.dict_dir = var.then(|| PathBuf::from("dicts/./es"));
+        let mut args = vec!["spell", "notas/doc.md", "--json"];
+        if flag {
+            args.extend(["--dict-dir", "dicts/./es"]);
+        }
+        let spell = fx.run(&args);
+        assert_eq!(spell.code, 3);
+        let message = spell.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            message.starts_with(&format!(
+                "cannot read the dictionary file {}: ",
+                dict.display()
+            )),
+            "{message}"
+        );
+    }
 }

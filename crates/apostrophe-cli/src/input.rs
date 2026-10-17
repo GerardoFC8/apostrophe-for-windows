@@ -63,15 +63,20 @@ pub fn read(arg: &Path, cwd: &Path, stdin: &mut dyn Read) -> Result<Input, CliEr
     })
 }
 
-/// `path` como ruta absoluta: las relativas se resuelven contra `cwd`, el directorio de
-/// trabajo de quien lanzo la CLI (pandoc corre en otro, asi que nada puede quedar
-/// relativo). No toca el disco.
+/// `path` como ruta absoluta y normalizada: las relativas se resuelven contra `cwd`, el
+/// directorio de trabajo de quien lanzo la CLI (pandoc corre en otro, asi que nada puede
+/// quedar relativo). Es la UNICA via por la que pasan las rutas del usuario: la entrada,
+/// `-o`, los archivos de `open` y la carpeta del diccionario.
+///
+/// La normaliza `std::path::absolute`, sin tocar el disco: quita los `.` y los separadores
+/// repetidos, y en Windows (`GetFullPathNameW`) cambia cada `/` por `\` y resuelve los
+/// `..`. En POSIX los `..` se conservan, porque un enlace simbolico los cambia. No se usa
+/// `canonicalize`: exige que la ruta exista y en Windows agrega el prefijo `\\?\`.
 pub fn absolutize(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    }
+    // `join` con una ruta absoluta la devuelve tal cual.
+    let joined = cwd.join(path);
+    // Solo falla con una ruta vacia o sintacticamente invalida: entonces, sin normalizar.
+    std::path::absolute(&joined).unwrap_or(joined)
 }
 
 /// Una ruta como texto para el JSON (con reemplazo si no es Unicode valido).
@@ -145,5 +150,60 @@ mod tests {
         );
         let absolute = cwd.join("c.md");
         assert_eq!(absolutize(Path::new("otro"), &absolute), absolute);
+    }
+
+    /// La ruta como texto, para compararla tal cual: `Path` compara por componentes y da
+    /// por iguales `a/./b` y `a/b` (y, en Windows, `a/b` y `a\b`).
+    fn text(path: PathBuf) -> String {
+        path.into_os_string().into_string().unwrap()
+    }
+
+    /// `base` seguida de `parts`, con el separador de la plataforma.
+    fn native(base: &Path, parts: &[&str]) -> String {
+        let mut path = base.display().to_string();
+        for part in parts {
+            path.push(std::path::MAIN_SEPARATOR);
+            path.push_str(part);
+        }
+        path
+    }
+
+    #[test]
+    fn las_rutas_se_normalizan_al_resolverlas() {
+        let cwd = scratch("input-norm");
+        // `.` y los separadores repetidos sobran en cualquier plataforma; en Windows,
+        // ademas, cada `/` pasa a ser `\`.
+        assert_eq!(
+            text(absolutize(&cwd, Path::new("a/./b//c.md"))),
+            native(&cwd, &["a", "b", "c.md"])
+        );
+        // Una ruta que ya es absoluta tambien se normaliza.
+        let absolute = format!("{}/x/./y.md", cwd.display());
+        assert_eq!(
+            text(absolutize(Path::new("otro"), Path::new(&absolute))),
+            native(&cwd, &["x", "y.md"])
+        );
+    }
+
+    #[test]
+    fn los_dos_puntos_siguen_las_reglas_de_cada_plataforma() {
+        let cwd = scratch("input-dotdot");
+        let resolved = text(absolutize(&cwd, Path::new("a/./b/../c.md")));
+        if cfg!(windows) {
+            // Windows los resuelve sin mirar el disco, como `GetFullPathNameW`.
+            assert_eq!(resolved, native(&cwd, &["a", "c.md"]));
+        } else {
+            // POSIX los conserva: si `b` fuera un enlace simbolico, `b/..` no seria `a`.
+            assert_eq!(resolved, native(&cwd, &["a", "b", "..", "c.md"]));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn en_windows_una_ruta_con_barras_queda_solo_con_barras_invertidas() {
+        let cwd = scratch("input-slash");
+        let resolved = text(absolutize(&cwd, Path::new("salida/a.pdf")));
+        assert!(!resolved.contains('/'), "{resolved}");
+        assert_eq!(resolved, native(&cwd, &["salida", "a.pdf"]));
     }
 }
