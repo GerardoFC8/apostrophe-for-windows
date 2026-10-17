@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use crate::workspace::DocId;
+
 /// Metadata que acompana a cada snapshot: ruta original del doc (si la habia) y
 /// momento de guardado (epoch secs) para elegir el mas reciente al restaurar.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -33,6 +35,33 @@ pub fn meta_file_name(id: &str) -> String {
 /// (asi al enumerar el dir se ignoran .meta.json y archivos ajenos).
 pub fn parse_snapshot_id(file_name: &str) -> Option<&str> {
     file_name.strip_suffix(".snapshot")
+}
+
+/// Id del snapshot de UN documento de la sesión: con varias pestañas cada documento
+/// tiene su propio respaldo, así que el nombre combina la sesión y el `DocId`.
+pub fn doc_snapshot_id(session: &str, doc: DocId) -> String {
+    format!("{session}-{doc}")
+}
+
+/// ¿El archivo es un snapshot (o su metadata) de esta sesión? Sirve para borrar de una
+/// vez todos los respaldos de la sesión al cerrar la ventana.
+pub fn is_session_file(file_name: &str, session: &str) -> bool {
+    let Some(rest) = file_name
+        .strip_prefix(session)
+        .and_then(|r| r.strip_prefix('-'))
+    else {
+        return false;
+    };
+    let id = rest
+        .strip_suffix(".snapshot")
+        .or_else(|| rest.strip_suffix(".meta.json"));
+    id.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Ordena los snapshots huérfanos del más reciente al más antiguo: el primero es el que
+/// restaura un frontend de un solo documento.
+pub fn sort_newest_first<T>(items: &mut [(T, SnapshotMeta)]) {
+    items.sort_by_key(|(_, meta)| std::cmp::Reverse(meta.saved_at));
 }
 
 #[cfg(test)]
@@ -72,6 +101,39 @@ mod tests {
     #[test]
     fn parse_snapshot_id_ignora_meta_json() {
         assert_eq!(parse_snapshot_id("abc.meta.json"), None);
+    }
+
+    #[test]
+    fn doc_snapshot_id_combina_sesion_y_documento() {
+        assert_eq!(doc_snapshot_id("abc", 3), "abc-3");
+        assert_ne!(doc_snapshot_id("abc", 3), doc_snapshot_id("abc", 4));
+    }
+
+    #[test]
+    fn is_session_file_reconoce_snapshot_y_meta_de_la_sesion() {
+        let id = doc_snapshot_id("abc", 3);
+        assert!(is_session_file(&snapshot_file_name(&id), "abc"));
+        assert!(is_session_file(&meta_file_name(&id), "abc"));
+    }
+
+    #[test]
+    fn is_session_file_ignora_otras_sesiones_y_archivos_ajenos() {
+        let otra = doc_snapshot_id("xyz", 3);
+        assert!(!is_session_file(&snapshot_file_name(&otra), "abc"));
+        assert!(!is_session_file("abc-3.md", "abc"));
+        assert!(!is_session_file("abcd-3.snapshot", "abc"));
+    }
+
+    #[test]
+    fn sort_newest_first_ordena_por_fecha_descendente() {
+        let meta = |saved_at| SnapshotMeta {
+            original_path: None,
+            saved_at,
+        };
+        let mut items = vec![("a", meta(10)), ("b", meta(30)), ("c", meta(20))];
+        sort_newest_first(&mut items);
+        let ids: Vec<_> = items.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec!["b", "c", "a"]);
     }
 
     #[test]
