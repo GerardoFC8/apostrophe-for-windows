@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Carpeta de instalacion: la del ejecutable que esta corriendo, donde el instalador deja
-/// los sidecars, `dictionaries/` y los dos ejecutables (`apostrophe` y `apostrophe-cli`).
+/// los sidecars, `dictionaries/` y los dos ejecutables (la GUI `apostrophe` y la CLI
+/// `elision`).
 ///
 /// La ruta del ejecutable se resuelve con `canonicalize`, igual que `STARTING_BINARY` de
 /// tauri-utils (lo que usa tauri-plugin-shell para ubicar los sidecars): asi la GUI y la

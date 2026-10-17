@@ -1030,3 +1030,50 @@ fn otro_fallo_al_escribir_stdout_es_un_error_de_e_s() {
         out.stderr
     );
 }
+
+// --- arranque del ejecutable (4.2) ---
+
+/// Lo que deja `startup_failure`, el camino del ejecutable cuando no puede armar su `Env`.
+fn startup(args: &[&str], error: &apostrophe_cli::error::CliError) -> Outcome {
+    let args: Vec<std::ffi::OsString> = std::iter::once("elision")
+        .chain(args.iter().copied())
+        .map(Into::into)
+        .collect();
+    let mut stdin: &[u8] = b"";
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code = apostrophe_cli::startup_failure(
+        &args,
+        error,
+        &mut Io {
+            stdin: &mut stdin,
+            stdout: &mut stdout,
+            stderr: &mut stderr,
+        },
+    );
+    Outcome {
+        code,
+        stdout: String::from_utf8(stdout).unwrap(),
+        stderr: String::from_utf8(stderr).unwrap(),
+    }
+}
+
+#[test]
+fn un_fallo_al_arrancar_sigue_el_contrato_de_errores() {
+    let error = apostrophe_cli::error::CliError::io("cannot read the current folder");
+    let text = startup(&["stats", "doc.md"], &error);
+    assert_eq!(text.code, 5);
+    assert_eq!(text.stdout, "");
+    assert_eq!(
+        text.stderr,
+        "elision: error[io_error]: cannot read the current folder\n"
+    );
+
+    // Con `--json` en cualquier lugar (antes de `--`), el sobre de error a stdout.
+    let json = startup(&["--json", "stats", "doc.md"], &error);
+    assert_eq!(json.code, 5);
+    assert_eq!(json.stderr, "");
+    assert_eq!(json.json()["error"]["code"], "io_error");
+    let after = startup(&["stats", "--", "--json"], &error);
+    assert_eq!(after.stdout, "");
+}

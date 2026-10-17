@@ -77,6 +77,13 @@ where
     }
 }
 
+/// El ejecutable no pudo armar su [`Env`] (no ubica su carpeta, o el directorio actual ya
+/// no existe): informa `error` con el mismo contrato que un comando que falla, `--json`
+/// incluido, y devuelve el codigo de salida. `args` incluye el nombre del programa.
+pub fn startup_failure(args: &[OsString], error: &CliError, io: &mut Io) -> i32 {
+    fail(error, wants_json(args), io)
+}
+
 /// `true` si el usuario pidio `--json`. Se busca en los argumentos crudos porque cuando
 /// clap falla no hay nada parseado, y su error tambien tiene que salir en JSON. Despues de
 /// `--` todo es posicional.

@@ -4,6 +4,10 @@ version = "0.3.0"
 description = "Clon nativo de Apostrophe para Windows (Tauri + Rust)"
 authors = ["Gerardo Franco"]
 edition = "2021"
+# Hay dos ejecutables: la GUI (`src/main.rs`) y la CLI `elision` (`src/bin/elision.rs`).
+# `cargo run` y `pnpm tauri dev` lanzan la GUI; tauri-cli tambien la marca como la
+# principal del instalador.
+default-run = "apostrophe"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,6 +27,10 @@ tauri-build = { version = "2", features = [] }
 apostrophe-core = { path = "../crates/apostrophe-core", features = ["serde", "spellbook-backend"] }
 # Adaptador secundario sin Tauri (export, sidecars, imagenes, diccionario), compartido con la CLI.
 apostrophe-sidecars = { path = "../crates/apostrophe-sidecars" }
+# Segundo adaptador primario: la CLI `elision`. Aqui solo la usa su ejecutable
+# (`src/bin/elision.rs`), que va en este paquete porque tauri-cli solo empaqueta los
+# ejecutables de src-tauri.
+apostrophe-cli = { path = "../crates/apostrophe-cli" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # M2: pandoc como sidecar (externalBin) en vez del binario del sistema.
