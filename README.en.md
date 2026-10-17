@@ -20,6 +20,7 @@ with **Tauri 2 + Rust** on a hexagonal architecture
   dialog's "Save as type" dropdown. The bundled sidecars (pandoc and typst) handle
   everything: nothing else to install.
 - Spanish spell checking (Hunspell via `spellbook`, pure Rust).
+- `elision` CLI for AI agents and scripts (see [CLI for agents](#cli-for-agents-elision)).
 
 ## Installation
 
@@ -43,6 +44,106 @@ winget uninstall GerardoFC8.ApostropheForWindows
 > newest one, download `Apostrophe_<version>_x64-setup.exe` from
 > [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) and run it
 > (see ["Windows protected your PC"](#windows-protected-your-pc--this-is-normal)).
+
+## CLI for agents (`elision`)
+
+The installer also puts the **`elision`** command on the PATH: a CLI for AI agents and
+scripts. It uses the same pandoc, typst and dictionary as the app, never asks for
+confirmation, and its output is stable. The contract is the **exit codes and error codes**;
+messages are in English and are only diagnostics.
+
+> After installing, open a **new** terminal. Terminals that were already open (and the
+> agents running in them) keep the old PATH and will not find `elision`.
+
+```powershell
+elision --help
+elision stats notes.md --json
+elision export notes.md -o notes.pdf
+```
+
+### Commands
+
+| Command | What it does | Exits with 1 when… |
+|---|---|---|
+| `export <in> -o <out> [--to <fmt>]` | Converts to PDF, HTML, ODT, DOCX, EPUB or LaTeX. The format comes from the extension of `-o`, or from `--to`. Overwrites without asking. | — |
+| `stats <in>` | Characters, words, sentences, paragraphs and reading time. | — |
+| `tables <in> [--check \| --write]` | Checks (the default) or rewrites the alignment of every table. | there are misaligned tables (`--check` only) |
+| `spell <in> [--dict-dir <dir>]` | Spanish spelling, with line and column (1-based). | there are misspellings |
+| `open <files>...` | Opens the files in the editor without waiting for it to close. | — |
+
+- **Standard input:** `<in>` can be `-` (except with `tables --write`). It is decoded like a
+  file: UTF-8 or any other encoding the app can open. With `-`, `export` has no document
+  folder and leaves relative images out.
+- **`--json`**, before or after the subcommand: a single JSON line on stdout, ASCII only
+  (everything else is written as `\uXXXX`), errors included. Without `--json`, stdout carries
+  only data and stderr carries diagnostics.
+- **Dictionary:** `--dict-dir`; otherwise the `ELISION_DICT_DIR` variable; otherwise the one
+  that ships with the installation. The first one given is used without falling back to the
+  next: if it fails, the result is `dictionary_missing`.
+- Relative paths are resolved against the current folder, and the document's images against
+  the document's folder: you can export from anywhere.
+
+### Exit codes
+
+| Exit | Meaning | `error.code` (JSON) |
+|---|---|---|
+| 0 | Success | — |
+| 1 | Findings: misspellings or misaligned tables | — (`"ok": true`) |
+| 2 | Invalid usage: arguments, unknown format | `usage` |
+| 3 | pandoc, typst, the editor or the dictionary is missing | `sidecar_missing`, `dictionary_missing` |
+| 4 | pandoc or typst failed to convert | `conversion_failed` |
+| 5 | I/O error: missing file, output not writable | `io_error` |
+
+An error with `--json`:
+
+```json
+{"ok":false,"error":{"code":"usage","message":"cannot tell the export format from x.xyz; use --to with one of: html, pdf, odt, docx, epub, latex"}}
+```
+
+### Examples for an agent
+
+```powershell
+# Spelling: read the JSON, not the text.
+elision spell chapter.md --json
+# {"ok":true,"file":"C:\\notes\\chapter.md","language":"es","misspellings":[{"line":7,"column":6,"word":"mundoo","suggestions":["mundo","mundos","mundo o","mundano"]}]}
+
+# Tables: rewrite only when --check found something (exit code 1).
+elision tables chapter.md --check --json
+if ($LASTEXITCODE -eq 1) { elision tables chapter.md --write }
+
+# Export from another folder; relative images are resolved against the document.
+elision export docs\chapter.md -o C:\out\chapter.pdf --json
+# {"ok":true,"output":"C:\\out\\chapter.pdf","format":"pdf"}
+```
+
+### Known limitations
+
+- **Accents in PowerShell pipes.** Windows PowerShell 5.1 sends text to other programs using
+  `$OutputEncoding`, which is ASCII by default: `Get-Content x.md | elision stats -` turns
+  accented letters into `?`. PowerShell also decodes text output with the console code page.
+  Pass the file path instead of `-`, read results with `--json` (ASCII only) and export with
+  `-o`.
+- **PATH precedence.** The installation folder also contains `pandoc.exe` and `typst.exe`,
+  and it is added to the **end** of the PATH. With the NSIS installer (the one winget uses),
+  any pandoc or typst already earlier on the PATH wins. With the MSI the folder goes to the
+  system `Path`, which Windows puts before the user one: the bundled copies shadow the ones
+  you installed for your user only. `elision` always uses its own.
+- **`tables --write` is not atomic:** it rewrites the file in place, like the app's save. If
+  the file is open in the app, the app shows its external-change notice.
+- **Skipped tables:** `tables` reports, without fixing them, the tables it cannot align
+  (escaped pipe `\|`, rows with extra cells, mixed indentation, or a table inside a quote).
+  They are listed in the JSON `skipped` field (`escaped_pipe`, `extra_cells`, `mixed_indent`,
+  `blockquote`) and as a warning on stderr; they do not change the exit code.
+- **HTML without a theme:** HTML export uses pandoc's default style, not the app's theme.
+- **`open` with several files:** it passes them all, but for now the editor opens only the
+  first one (it warns on stderr).
+- **Unsigned:** `elision.exe` is not signed either. Some antivirus products distrust new
+  unsigned executables and may block or quarantine it; if that happens, add an exception for
+  the installation folder.
+
+During development, without installing: `cargo run -p apostrophe --bin elision -- --help`.
+The architecture is described in
+[`docs/adr/0002-cli-adaptador-primario.md`](docs/adr/0002-cli-adaptador-primario.md).
 
 ## Development requirements
 
@@ -102,6 +203,12 @@ Defined in `src-tauri/tauri.conf.json` (`bundle`):
   rights (UAC). For per-machine distribution, change it to `"perMachine"`.
 - **Installer languages**: Spanish (with a language selector).
 - **`.md` / `.markdown` file association** — declared in the installer.
+- **`elision` on the PATH** — the NSIS installer appends the installation folder to your
+  user `Path` (`src-tauri/windows/hooks.nsh`, which runs `elision-path.ps1`); the MSI
+  appends it to the system `Path` (`src-tauri/windows/cli-path.wxs`). Uninstalling removes
+  only that entry, and reinstalling does not duplicate it. The script's tests run in CI; by
+  hand:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/windows/elision-path.tests.ps1`.
 
 ### "Windows protected your PC" — this is normal
 
