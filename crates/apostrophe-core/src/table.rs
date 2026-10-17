@@ -182,6 +182,208 @@ pub fn align_table(text: &str) -> Option<String> {
     Some(out)
 }
 
+/// Una tabla que encontro [`align_tables`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableSpan {
+    /// Linea del encabezado en el documento original, base 1 (como la muestra un editor).
+    pub line: usize,
+    /// `true` si ya estaba alineada: realinearla no cambio ni un byte.
+    pub aligned: bool,
+}
+
+/// Resultado de [`align_tables`]: el documento con todas sus tablas alineadas y una
+/// entrada por tabla, en orden de aparicion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlignedTables {
+    pub text: String,
+    pub tables: Vec<TableSpan>,
+}
+
+/// Alinea TODAS las tablas pipe de un documento y deja intacto el resto del texto.
+///
+/// Las tablas dentro de bloques de codigo (cercas ``` o ~~~, o sangria de 4 espacios o un
+/// tab) no se tocan: ahi el texto es literal. Cada tabla conserva su sangria y los saltos de
+/// linea de cada renglon (LF o CRLF), y la ultima linea sin salto sigue sin salto.
+///
+/// Es idempotente y, si ninguna tabla cambia, `text` es identico a `doc` byte a byte: quien
+/// llama puede comparar para decidir si hace falta reescribir el archivo.
+pub fn align_tables(doc: &str) -> AlignedTables {
+    let lines: Vec<Line> = doc.split_inclusive('\n').map(Line::new).collect();
+    let mut text = String::with_capacity(doc.len());
+    let mut tables = Vec::new();
+    let mut fence: Option<Fence> = None;
+
+    let mut i = 0;
+    while i < lines.len() {
+        let line = &lines[i];
+        if let Some(open) = fence {
+            if closes_fence(open, line.content) {
+                fence = None;
+            }
+        } else if let Some(open) = opening_fence(line.content) {
+            fence = Some(open);
+        } else if is_table_candidate(line.content) {
+            // Un bloque es una racha de lineas con barras: una tabla no cruza lineas vacias.
+            let end = (i..lines.len())
+                .find(|&j| !is_table_candidate(lines[j].content))
+                .unwrap_or(lines.len());
+            align_block(&lines[i..end], i + 1, &mut text, &mut tables);
+            i = end;
+            continue;
+        }
+        line.push_to(&mut text);
+        i += 1;
+    }
+
+    AlignedTables { text, tables }
+}
+
+/// Una linea del documento separada de su salto (`"\n"`, `"\r\n"` o nada al final).
+struct Line<'a> {
+    content: &'a str,
+    ending: &'a str,
+}
+
+impl<'a> Line<'a> {
+    fn new(raw: &'a str) -> Self {
+        let cut = if raw.ends_with("\r\n") {
+            raw.len() - 2
+        } else if raw.ends_with('\n') {
+            raw.len() - 1
+        } else {
+            raw.len()
+        };
+        let (content, ending) = raw.split_at(cut);
+        Line { content, ending }
+    }
+
+    fn push_to(&self, out: &mut String) {
+        out.push_str(self.content);
+        out.push_str(self.ending);
+    }
+}
+
+/// Cerca de un bloque de codigo: el caracter (` o ~) y cuantos lleva.
+#[derive(Debug, Clone, Copy)]
+struct Fence {
+    marker: char,
+    len: usize,
+}
+
+/// La cerca que abre esta linea, si abre una, y lo que la sigue (el info string).
+fn fence_at(content: &str) -> Option<(Fence, &str)> {
+    let rest = &content[table_indent(content)?.len()..];
+    let marker = rest.chars().next().filter(|c| *c == '`' || *c == '~')?;
+    let len = rest.chars().take_while(|c| *c == marker).count();
+    // `marker` es ASCII: `len` caracteres son `len` bytes.
+    (len >= 3).then(|| (Fence { marker, len }, &rest[len..]))
+}
+
+fn opening_fence(content: &str) -> Option<Fence> {
+    fence_at(content).map(|(fence, _)| fence)
+}
+
+/// Cierra la cerca `open` una linea con el MISMO caracter, al menos tantos como la que
+/// abrio y nada mas: con una de cuatro, una de tres de adentro es contenido.
+fn closes_fence(open: Fence, content: &str) -> bool {
+    fence_at(content).is_some_and(|(fence, rest)| {
+        fence.marker == open.marker && fence.len >= open.len && rest.trim().is_empty()
+    })
+}
+
+/// Sangria de una linea: hasta 3 espacios. `None` si es codigo indentado (4 espacios o mas,
+/// o un tab), donde una tabla no es tabla sino texto literal.
+fn table_indent(content: &str) -> Option<&str> {
+    let spaces = content.len() - content.trim_start_matches(' ').len();
+    if spaces >= 4 || content[spaces..].starts_with('\t') {
+        return None;
+    }
+    Some(&content[..spaces])
+}
+
+/// Linea que puede ser parte de una tabla: tiene barras, no es codigo indentado y no abre
+/// una cerca (```` ```md|x ```` lleva una barra, pero lo que sigue es codigo).
+fn is_table_candidate(content: &str) -> bool {
+    content.contains('|')
+        && !content.trim().is_empty()
+        && table_indent(content).is_some()
+        && opening_fence(content).is_none()
+}
+
+/// `true` si la linea es una fila separadora (`|---|:-:|`): todas sus celdas lo son.
+fn is_separator_row(content: &str) -> bool {
+    cells(content).iter().all(|c| is_separator_cell(c))
+}
+
+/// Alinea un bloque de lineas con barras que empieza en la linea `first_line` (base 1).
+///
+/// El encabezado es la linea que precede al PRIMER separador, como en GFM: sin una linea
+/// vacia de por medio, una linea de prosa con barras queda en el mismo bloque y no debe
+/// esconder la tabla. Lo que va antes del encabezado es prosa y se copia tal cual, igual
+/// que el bloque entero si no es una tabla o no se puede alinear sin inventar nada.
+fn align_block(block: &[Line], first_line: usize, text: &mut String, tables: &mut Vec<TableSpan>) {
+    let header = (1..block.len())
+        .find(|&j| is_separator_row(block[j].content))
+        .map(|j| j - 1);
+    let Some((prose, table)) = header.map(|h| block.split_at(h)) else {
+        block.iter().for_each(|l| l.push_to(text));
+        return;
+    };
+    prose.iter().for_each(|l| l.push_to(text));
+    match realign(table) {
+        Some(rebuilt) => {
+            let mut original = String::new();
+            table.iter().for_each(|l| l.push_to(&mut original));
+            tables.push(TableSpan {
+                line: first_line + prose.len(),
+                aligned: rebuilt == original,
+            });
+            text.push_str(&rebuilt);
+        }
+        None => table.iter().for_each(|l| l.push_to(text)),
+    }
+}
+
+/// La tabla alineada, con la sangria comun y el salto de cada linea originales.
+///
+/// `None` si no es una tabla, si la sangria no es la misma en todas las lineas (elegir una
+/// seria decidir por el autor) o si alinearla perderia contenido.
+fn realign(table: &[Line]) -> Option<String> {
+    let indent = table_indent(table[0].content)?;
+    if table
+        .iter()
+        .any(|l| table_indent(l.content) != Some(indent))
+    {
+        return None;
+    }
+    if would_lose_content(table) {
+        return None;
+    }
+    let body: Vec<&str> = table.iter().map(|l| &l.content[indent.len()..]).collect();
+    let aligned = align_table(&body.join("\n"))?;
+    // `align_table` devuelve una linea por cada linea no vacia; si no, mejor no tocar nada.
+    if aligned.lines().count() != table.len() {
+        return None;
+    }
+    let mut out = String::new();
+    for (line, new) in table.iter().zip(aligned.lines()) {
+        out.push_str(indent);
+        out.push_str(new);
+        out.push_str(line.ending);
+    }
+    Some(out)
+}
+
+/// `true` si `align_table` estropearia la tabla: parte por TODAS las barras, asi que una
+/// barra escapada (`\|`) quedaria partida en dos celdas, y dibuja solo las columnas del
+/// encabezado, asi que una fila con celdas de mas las perderia.
+fn would_lose_content(table: &[Line]) -> bool {
+    let columns = cells(table[0].content).len();
+    table
+        .iter()
+        .any(|l| l.content.contains("\\|") || cells(l.content).len() > columns)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +500,181 @@ mod tests {
         let una = align_table("| a | bbbb |\n|---|---|\n| 1 | 2 |").unwrap();
         let dos = align_table(&una).unwrap();
         assert_eq!(una, dos);
+    }
+
+    // --- align_tables: todas las tablas de un documento ---
+
+    /// Atajo para comparar los reportes: `(linea, ya_alineada)`.
+    fn spans(result: &AlignedTables) -> Vec<(usize, bool)> {
+        result.tables.iter().map(|t| (t.line, t.aligned)).collect()
+    }
+
+    #[test]
+    fn alinea_dos_tablas_sin_tocar_el_texto_entre_ellas() {
+        let doc = "# Notas\n\n| a | bb |\n|---|---|\n| ccc | d |\n\n\
+                   Texto | con barra en medio.\n\n| x |\n|:-:|\n| yyyyy |\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            "# Notas\n\n| a   | bb  |\n| --- | --- |\n| ccc | d   |\n\n\
+             Texto | con barra en medio.\n\n|   x   |\n| :---: |\n| yyyyy |\n"
+        );
+        // Lineas base 1 del encabezado de cada tabla.
+        assert_eq!(spans(&result), [(3, false), (9, false)]);
+    }
+
+    #[test]
+    fn alinear_un_documento_dos_veces_no_lo_mueve() {
+        let primera = align_tables("| a | bb |\n|---|---|\n| ccc | d |\n\n| x |\n|---|\n");
+        let segunda = align_tables(&primera.text);
+        assert_eq!(segunda.text, primera.text);
+        assert_eq!(spans(&primera), [(1, false), (5, false)]);
+        assert_eq!(spans(&segunda), [(1, true), (5, true)]);
+    }
+
+    #[test]
+    fn sin_cambios_el_texto_es_identico_byte_a_byte() {
+        // Espacios al final, saltos mezclados y un final sin salto: si ninguna tabla cambia,
+        // el resultado es EXACTAMENTE la entrada (lo que permite no reescribir el archivo).
+        let doc = "Título  \r\n\n| a   | bb  |\n| --- | --- |\r\n\n  sangría  \nsin salto";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert_eq!(spans(&result), [(3, true)]);
+    }
+
+    #[test]
+    fn un_documento_sin_tablas_no_reporta_ninguna() {
+        let doc = "Solo texto.\n\nUna | barra suelta no hace una tabla.\n";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert!(result.tables.is_empty());
+        assert_eq!(align_tables("").text, "");
+    }
+
+    #[test]
+    fn las_tablas_dentro_de_bloques_de_codigo_no_se_tocan() {
+        // La cerca de cuatro acentos no se cierra con la de tres que lleva adentro; la tabla
+        // de despues de las cercas SI se alinea (prueba que se cerraron bien).
+        let doc = "```\n| a | b |\n|---|---|\n```\n\n~~~md\n| c | d |\n|---|---|\n~~~\n\n\
+                   ````\n```\n| e | f |\n|---|---|\n```\n````\n\n| g | h |\n|---|---|\n";
+        let result = align_tables(doc);
+        let expected = doc.replace("| g | h |\n|---|---|\n", "| g   | h   |\n| --- | --- |\n");
+        assert_eq!(result.text, expected);
+        assert_eq!(spans(&result), [(18, false)]);
+    }
+
+    #[test]
+    fn conserva_los_saltos_crlf() {
+        let doc = "Intro\r\n\r\n| a | bb |\r\n|---|---|\r\n| ccc | d |\r\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            "Intro\r\n\r\n| a   | bb  |\r\n| --- | --- |\r\n| ccc | d   |\r\n"
+        );
+        assert_eq!(
+            result.text.matches('\n').count(),
+            result.text.matches("\r\n").count(),
+            "no deberia quedar ningun salto LF suelto"
+        );
+    }
+
+    #[test]
+    fn la_ultima_linea_sin_salto_sigue_sin_salto() {
+        let result = align_tables("Texto\n\n| a | bb |\n|---|---|");
+        assert_eq!(result.text, "Texto\n\n| a   | bb  |\n| --- | --- |");
+        assert_eq!(spans(&result), [(3, false)]);
+    }
+
+    #[test]
+    fn una_tabla_con_sangria_de_dos_espacios_se_alinea_y_conserva_la_sangria() {
+        let result = align_tables("  | a | bb |\n  |---|---|\n  | ccc | d |\n");
+        assert_eq!(
+            result.text,
+            "  | a   | bb  |\n  | --- | --- |\n  | ccc | d   |\n"
+        );
+        assert_eq!(spans(&result), [(1, false)]);
+    }
+
+    #[test]
+    fn cuatro_espacios_o_un_tab_son_codigo_y_no_se_tocan() {
+        for doc in [
+            "    | a | bb |\n    |---|---|\n",
+            "\t| a | bb |\n\t|---|---|\n",
+        ] {
+            let result = align_tables(doc);
+            assert_eq!(result.text, doc);
+            assert!(result.tables.is_empty(), "{doc:?}");
+        }
+    }
+
+    #[test]
+    fn una_sangria_que_no_es_comun_deja_la_tabla_como_esta() {
+        // Realinearla obligaria a elegir una sangria por el autor: mejor no tocarla.
+        let doc = " | a | bb |\n|---|---|\n";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert!(result.tables.is_empty());
+    }
+
+    #[test]
+    fn una_linea_de_prosa_con_barra_justo_encima_no_esconde_la_tabla() {
+        // Sin linea vacia de por medio, la prosa queda en el mismo bloque de lineas con
+        // barras. El encabezado es la linea que precede al separador (como en GFM): lo de
+        // arriba es prosa y se deja intacto.
+        let doc = "Nota: a | b es un ejemplo.\n| a | bb |\n|---|---|\n| ccc | d |\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            "Nota: a | b es un ejemplo.\n| a   | bb  |\n| --- | --- |\n| ccc | d   |\n"
+        );
+        assert_eq!(spans(&result), [(2, false)]);
+    }
+
+    #[test]
+    fn varias_lineas_de_prosa_con_barras_encima_tampoco() {
+        let doc = "uno | dos\ntres | cuatro | cinco\n| a | bb |\n|---|---|\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            "uno | dos\ntres | cuatro | cinco\n| a   | bb  |\n| --- | --- |\n"
+        );
+        assert_eq!(spans(&result), [(3, false)]);
+    }
+
+    #[test]
+    fn una_cerca_con_barra_en_el_info_string_corta_la_tabla() {
+        // La linea de la cerca tiene una barra, pero abre un bloque de codigo: lo de adentro
+        // es literal aunque parezca la continuacion de la tabla de arriba.
+        let doc = "| a | bb |\n|---|---|\n```md|x\n| c | d |\n|---|---|\n```\n";
+        let result = align_tables(doc);
+        assert_eq!(
+            result.text,
+            "| a   | bb  |\n| --- | --- |\n```md|x\n| c | d |\n|---|---|\n```\n"
+        );
+        assert_eq!(spans(&result), [(1, false)]);
+    }
+
+    #[test]
+    fn una_tabla_que_perderia_contenido_se_deja_como_esta() {
+        // `align_table` parte por TODAS las barras y dibuja solo las columnas del
+        // encabezado: una barra escapada se partiria en dos celdas y una fila con celdas de
+        // mas las perderia. En vez de estropear el documento, la tabla no se toca.
+        for doc in [
+            "| a | b |\n|---|---|\n| x \\| y | z |\n",
+            "| a | b |\n|---|---|\n| uno \\| dos |\n",
+            "| a | b |\n|---|---|\n| 1 | 2 | 3 |\n",
+        ] {
+            let result = align_tables(doc);
+            assert_eq!(result.text, doc);
+            assert!(result.tables.is_empty(), "{doc:?}");
+        }
+    }
+
+    #[test]
+    fn un_separador_que_no_coincide_con_el_encabezado_no_es_tabla() {
+        let doc = "| a | b | c |\n|---|---|\n";
+        let result = align_tables(doc);
+        assert_eq!(result.text, doc);
+        assert!(result.tables.is_empty());
     }
 }
