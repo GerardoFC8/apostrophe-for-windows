@@ -716,6 +716,108 @@ fn una_salida_en_una_carpeta_inexistente_termina_con_5() {
     assert_eq!(out.json()["error"]["code"], "io_error");
 }
 
+/// `true` si este proceso puede abrir `path` para escritura a pesar de sus permisos (por
+/// ejemplo, si corre como root). Entonces los tests de permisos no prueban nada.
+fn ignores_permissions(path: &Path) -> bool {
+    let writable = if path.is_dir() {
+        let probe = path.join(".probe");
+        let ok = std::fs::write(&probe, "").is_ok();
+        let _ = std::fs::remove_file(&probe);
+        ok
+    } else {
+        std::fs::OpenOptions::new().write(true).open(path).is_ok()
+    };
+    if writable {
+        eprintln!(
+            "SALTADO: este usuario puede escribir en {} sin permiso.",
+            path.display()
+        );
+    }
+    writable
+}
+
+#[test]
+fn una_salida_de_solo_lectura_termina_con_5_sin_tocarla() {
+    // Se detecta ANTES de lanzar nada: aquí ni siquiera hay pandoc instalado, y el error
+    // no es `sidecar_missing` sino de E/S.
+    let fx = fixture("export-readonly");
+    fx.file("a.md", "Hola");
+    let out_path = fx.file("a.html", "viejo");
+    let original = std::fs::metadata(&out_path).unwrap().permissions();
+    let mut readonly = original.clone();
+    readonly.set_readonly(true);
+    std::fs::set_permissions(&out_path, readonly).unwrap();
+    if ignores_permissions(&out_path) {
+        return;
+    }
+    let out = fx.run(&["export", "a.md", "-o", "a.html", "--json"]);
+    std::fs::set_permissions(&out_path, original).unwrap();
+    assert_eq!(out.code, 5, "{}", out.stdout);
+    let json = out.json();
+    assert_eq!(json["error"]["code"], "io_error");
+    let message = json["error"]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with(&format!("cannot write {}: ", out_path.display())),
+        "{message}"
+    );
+    assert_eq!(std::fs::read_to_string(&out_path).unwrap(), "viejo");
+}
+
+#[cfg(unix)]
+#[test]
+fn una_carpeta_sin_permiso_de_escritura_termina_con_5_sin_lanzar_pandoc() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = fixture("export-readonly-dir");
+    // Si llegara a correr, fallaria como el pandoc real.
+    fake_sidecar(
+        &fx,
+        "pandoc",
+        "echo 'pandoc: a.html: withFile: permission denied' >&2; exit 1",
+    );
+    fx.file("a.md", "Hola");
+    let dir = fx.cwd.join("solo-lectura");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if ignores_permissions(&dir) {
+        return;
+    }
+    let out = fx.run(&["export", "a.md", "-o", "solo-lectura/a.html"]);
+    let left = std::fs::read_dir(&dir).unwrap().count();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(out.code, 5, "{}", out.stderr);
+    assert_eq!(out.stdout, "");
+    assert!(
+        out.stderr.starts_with(&format!(
+            "elision: error[io_error]: cannot write {}: ",
+            dir.join("a.html").display()
+        )),
+        "{}",
+        out.stderr
+    );
+    assert_eq!(left, 0, "quedo algo en la carpeta");
+}
+
+#[cfg(unix)]
+#[test]
+fn un_fallo_de_conversion_muestra_una_sola_linea_y_no_deja_la_salida() {
+    let fx = fixture("export-backtrace");
+    // Como el pandoc real: la causa y despues la traza de GHC.
+    fake_sidecar(
+        &fx,
+        "pandoc",
+        "printf 'pandoc: bad input\\nHasCallStack backtrace:\\n  collectBacktraces, called at x.hs:1:1\\n\\n' >&2; exit 1",
+    );
+    fx.file("a.md", "Hola");
+    let out = fx.run(&["export", "a.md", "-o", "a.html"]);
+    assert_eq!(out.code, 4);
+    assert_eq!(
+        out.stderr,
+        "elision: error[conversion_failed]: pandoc failed (exit code 1): pandoc: bad input\n"
+    );
+    // Comprobar que la salida se podia escribir no deja un archivo vacio.
+    assert!(!fx.cwd.join("a.html").exists());
+}
+
 #[test]
 fn export_html_incrusta_la_imagen_relativa_desde_otra_carpeta() {
     let Some(install) = real_sidecars() else {

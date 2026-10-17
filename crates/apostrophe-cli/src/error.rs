@@ -94,16 +94,32 @@ impl From<ExportError> for CliError {
                     Some(code) => format!("exit code {code}"),
                     None => "terminated by a signal".to_string(),
                 };
-                let stderr = stderr.trim();
-                let message = if stderr.is_empty() {
-                    format!("{program} failed ({status})")
-                } else {
-                    format!("{program} failed ({status}): {stderr}")
+                let message = match failure_line(&stderr) {
+                    Some(line) => format!("{program} failed ({status}): {line}"),
+                    None => format!("{program} failed ({status})"),
                 };
                 Self::new(ErrorCode::ConversionFailed, message)
             }
         }
     }
+}
+
+/// La linea del stderr de pandoc o typst que explica el fallo. El resto es ruido en un
+/// mensaje de una linea: la traza de GHC que pandoc agrega a sus errores de E/S, o el
+/// contexto de fuente y los avisos que typst escribe DESPUES de su `error: ...`.
+///
+/// Es la primera linea no vacia que no sea un aviso de pandoc (`[WARNING] ...`,
+/// `[INFO] ...`), que los escribe ANTES del error. Si solo hay avisos, el primero.
+fn failure_line(stderr: &str) -> Option<&str> {
+    let lines = || {
+        stderr
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+    };
+    lines()
+        .find(|line| !line.starts_with("[WARNING]") && !line.starts_with("[INFO]"))
+        .or_else(|| lines().next())
 }
 
 impl From<DictionaryError> for CliError {
@@ -173,6 +189,58 @@ mod tests {
         });
         assert_eq!(killed.code, ErrorCode::ConversionFailed);
         assert_eq!(killed.message, "pandoc failed (terminated by a signal)");
+    }
+
+    /// Lo que deja en stderr el pandoc real cuando no puede escribir: la causa y despues
+    /// la traza de GHC.
+    const PANDOC_BACKTRACE: &str = "pandoc: a.html: withFile: permission denied (Permission denied)\n\
+        HasCallStack backtrace:\n  \
+        collectBacktraces, called at libraries/ghc-internal/src/GHC/Internal/Exception.hs:169:13 in ghc-internal:GHC.Internal.Exception\n  \
+        throwIO, called at libraries/ghc-internal/src/GHC/Internal/IO/Exception.hs:315:19 in ghc-internal:GHC.Internal.IO.Exception\n\n\n";
+
+    fn conversion_message(program: &str, stderr: &str) -> String {
+        CliError::from(ExportError::Failed {
+            program: program.into(),
+            code: Some(1),
+            stderr: stderr.into(),
+        })
+        .message
+    }
+
+    #[test]
+    fn un_fallo_de_conversion_conserva_solo_la_primera_linea_util() {
+        assert_eq!(
+            conversion_message("pandoc", PANDOC_BACKTRACE),
+            "pandoc failed (exit code 1): pandoc: a.html: withFile: permission denied (Permission denied)"
+        );
+        // typst: el error y despues su contexto de fuente y sus avisos.
+        assert_eq!(
+            conversion_message(
+                "typst",
+                "error: unknown variable: foo\n  \u{250c}\u{2500} documento.typ:3:1\n  \u{2502}\n3 \u{2502} #foo\n\nwarning: unknown font family: x\n"
+            ),
+            "typst failed (exit code 1): error: unknown variable: foo"
+        );
+    }
+
+    #[test]
+    fn los_avisos_previos_de_pandoc_no_son_la_causa_del_fallo() {
+        // pandoc escribe sus avisos (`[WARNING]`, `[INFO]`) antes del error.
+        assert_eq!(
+            conversion_message(
+                "pandoc",
+                "\n[WARNING] Could not fetch resource x.png: replacing image with description\n\
+                 [INFO] Loaded y.png\n\
+                 Error parsing YAML metadata at \"documento.md\" (line 1, column 1):\n\
+                 YAML parse exception at line 2, column 0,\n"
+            ),
+            "pandoc failed (exit code 1): Error parsing YAML metadata at \"documento.md\" (line 1, column 1):"
+        );
+        // Si solo hay avisos, el primero es mejor que nada.
+        assert_eq!(
+            conversion_message("pandoc", "  [WARNING] Duplicate identifier 'a'\n"),
+            "pandoc failed (exit code 1): [WARNING] Duplicate identifier 'a'"
+        );
     }
 
     #[test]

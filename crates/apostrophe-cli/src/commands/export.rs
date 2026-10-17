@@ -2,7 +2,8 @@
 //! typst de la instalacion. Las imagenes locales se resuelven igual: contra la carpeta del
 //! documento, que por stdin no existe (como un documento sin guardar).
 
-use std::io::Read;
+use std::fs::OpenOptions;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -92,21 +93,41 @@ fn resolve_format(args: &ExportArgs) -> Result<Format, CliError> {
     })
 }
 
-/// La salida tiene que poder crearse: si su carpeta no existe, pandoc fallaria y pareceria
-/// un fallo de conversion, cuando es un problema de E/S.
+/// La salida tiene que poder escribirse. Si no (su carpeta no existe, el archivo es de solo
+/// lectura, la carpeta no da permiso o, en Windows, otro programa tiene el archivo
+/// abierto), pandoc o typst fallarian y pareceria un fallo de conversion, cuando es un
+/// problema de E/S.
 fn check_output(output: &Path) -> Result<(), CliError> {
+    let cannot_write = |reason: &dyn std::fmt::Display| {
+        CliError::io(format!("cannot write {}: {reason}", output.display()))
+    };
     if output.is_dir() {
-        return Err(CliError::io(format!(
-            "cannot write {}: it is a folder",
-            output.display()
-        )));
+        return Err(cannot_write(&"it is a folder"));
     }
     match output.parent() {
-        Some(dir) if dir.is_dir() => Ok(()),
-        _ => Err(CliError::io(format!(
-            "cannot write {}: the folder does not exist",
-            output.display()
-        ))),
+        Some(dir) if dir.is_dir() => {}
+        _ => return Err(cannot_write(&"the folder does not exist")),
+    }
+    probe_writable(output).map_err(|e| cannot_write(&e))
+}
+
+/// Prueba de verdad que `output` se puede escribir, sin cambiar nada: los bits de permiso
+/// no bastan (en Windows, el atributo de solo lectura de una carpeta no impide crear
+/// archivos, y las ACL no se ven en ellos). Si el archivo existe, se abre para escritura
+/// SIN truncarlo; si no, se crea y se borra.
+fn probe_writable(output: &Path) -> io::Result<()> {
+    match OpenOptions::new().write(true).open(output) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(output)?;
+            // Si no se pudiera borrar, queda un archivo vacio que el export sobrescribe.
+            let _ = std::fs::remove_file(output);
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 
