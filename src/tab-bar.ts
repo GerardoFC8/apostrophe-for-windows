@@ -1,11 +1,12 @@
 // Barra de pestañas: presentacion pura de la coleccion de tabs.ts. Se repinta entera con
-// cada cambio (son pocas pestañas y el DOM es chico) y delega TODA accion en
+// cada cambio (son pocas pestañas y el DOM es pequeño) y delega TODA accion en
 // document-session.ts (activar, cerrar, nueva).
 //
-// Accesibilidad (patron ARIA "tabs"): role=tablist/tab, aria-selected, tabindex itinerante
-// (solo la activa entra en el orden de Tab) y flechas/Inicio/Fin para moverse, con
-// activacion automatica. Supr cierra la pestaña enfocada. El boton × queda fuera del orden
-// de tabulacion para no sumar una parada por pestaña (Ctrl+W y Supr cubren el teclado).
+// Accesibilidad (patron ARIA "tabs"): el tablist contiene SOLO pestañas (role=tab, con
+// aria-selected y tabindex itinerante: solo la activa entra en el orden de Tab) y se
+// recorre con flechas/Inicio/Fin, con activacion automatica. La × es un adorno para el
+// mouse dentro de la propia pestaña (aria-hidden, sin foco); el camino de teclado para
+// cerrar es Supr sobre la pestaña o Ctrl+W, y se anuncia con aria-keyshortcuts.
 import { activeDocId, allTabs, onTabsChanged, tabDisplayName, type DocId, type Tab } from "./tabs";
 import { activateTab, closeTab, newTab } from "./document-session";
 import { t } from "./i18n";
@@ -26,26 +27,23 @@ function tabTooltip(tab: Tab): string {
 }
 
 function tabButton(id: DocId): HTMLButtonElement | null {
-  return tabList.querySelector<HTMLButtonElement>(`.tab-btn[data-doc-id="${id}"]`);
+  return tabList.querySelector<HTMLButtonElement>(`.tab[data-doc-id="${id}"]`);
 }
 
 function buildTab(tab: Tab, active: boolean): HTMLElement {
   const name = tabDisplayName(tab);
 
-  const wrap = document.createElement("div");
-  wrap.className = "tab";
-  wrap.setAttribute("role", "presentation");
-  wrap.classList.toggle("is-active", active);
-  wrap.classList.toggle("is-dirty", tab.dirty);
-
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "tab-btn";
+  btn.className = "tab";
+  btn.classList.toggle("is-active", active);
+  btn.classList.toggle("is-dirty", tab.dirty);
   btn.id = `tab-${tab.id}`;
   btn.dataset.docId = String(tab.id);
   btn.setAttribute("role", "tab");
   btn.setAttribute("aria-selected", String(active));
   btn.setAttribute("aria-controls", "editor");
+  btn.setAttribute("aria-keyshortcuts", "Delete Control+W");
   btn.tabIndex = active ? 0 : -1;
   btn.title = tabTooltip(tab);
   // El ● es visual: el nombre accesible ya dice si hay cambios sin guardar.
@@ -58,35 +56,30 @@ function buildTab(tab: Tab, active: boolean): HTMLElement {
   dirty.className = "tab-dirty";
   dirty.setAttribute("aria-hidden", "true");
   dirty.textContent = "●";
-  btn.append(label, dirty);
-
-  const close = document.createElement("button");
-  close.type = "button";
+  // × solo para el mouse: fuera del arbol de accesibilidad y sin foco (ver cabecera).
+  const close = document.createElement("span");
   close.className = "tab-close";
-  close.tabIndex = -1;
-  close.setAttribute("aria-label", t("tabs.close", { name }));
+  close.setAttribute("aria-hidden", "true");
   close.title = t("tabs.closeHint");
   close.innerHTML = CLOSE_ICON; // markup fijo, sin datos del documento
+  btn.append(label, dirty, close);
 
-  btn.addEventListener("click", () => activateTab(tab.id));
-  btn.addEventListener("keydown", (e) => onTabKey(e, tab.id));
-  close.addEventListener("click", (e) => {
-    e.stopPropagation();
-    void closeTab(tab.id);
+  btn.addEventListener("click", (e) => {
+    if ((e.target as Element).closest(".tab-close")) void closeTab(tab.id);
+    else activateTab(tab.id);
   });
+  btn.addEventListener("keydown", (e) => onTabKey(e, tab.id));
   // Clic central cierra (convencion de navegadores y editores). En mousedown se evita el
   // autoscroll de Chromium; el cierre va en auxclick, que es el "clic" del boton central.
-  wrap.addEventListener("mousedown", (e) => {
+  btn.addEventListener("mousedown", (e) => {
     if (e.button === 1) e.preventDefault();
   });
-  wrap.addEventListener("auxclick", (e) => {
+  btn.addEventListener("auxclick", (e) => {
     if (e.button !== 1) return;
     e.preventDefault();
     void closeTab(tab.id);
   });
-
-  wrap.append(btn, close);
-  return wrap;
+  return btn;
 }
 
 // Navegacion por teclado dentro del tablist (el foco se queda en las pestañas).

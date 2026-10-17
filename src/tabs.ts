@@ -138,9 +138,17 @@ export function addTab(init: TabInit, text: string): Tab {
 
 /// Registra como pestaña ACTIVA lo que ya esta en la vista (el documento con el que arranca
 /// la app, o el en blanco que queda tras cerrar la ultima pestaña).
+///
+/// Solo es valido SIN pestaña activa: si la hubiera, el estado de la vista es el suyo y
+/// adoptarlo haria que dos pestañas compartieran el mismo documento. En ese caso (un error
+/// de quien llama) no se adopta nada: se crea la pestaña con un documento vacio propio.
 export function adoptViewAsTab(init: TabInit): Tab {
-  const current = activeTab();
-  if (current) current.parked = parkEditor();
+  if (activeTab()) {
+    console.error("adoptViewAsTab: ya hay una pestaña activa; se crea una nueva en su lugar");
+    const tab = addTab(init, "");
+    showTab(tab.id);
+    return tab;
+  }
   const tab = makeTab(init, null);
   tabs.push(tab);
   activeId = tab.id;

@@ -27,11 +27,12 @@ export function initFileShortcuts(): void {
     } else if (k === "e") {
       e.preventDefault();
       void exportDoc();
-    } else if (k === "n" && !e.shiftKey) {
+    } else if (k === "n") {
       // Ctrl+N: documento nuevo en su propia pestaña (igual que Ctrl+T). Sin autorepeat:
-      // mantener la tecla no debe abrir decenas de pestañas.
+      // mantener la tecla no debe abrir decenas de pestañas. Ctrl+Shift+N no hace nada,
+      // pero se previene igual para que WebView2 no aplique su accion por defecto.
       e.preventDefault();
-      if (!e.repeat) void newTab();
+      if (!e.shiftKey && !e.repeat) void newTab();
     }
   });
 }
@@ -48,7 +49,7 @@ function escHasPriorityTarget(): boolean {
 
 // Atajos de los MODOS DE ESCRITURA y de las PESTAÑAS a nivel WINDOW en fase CAPTURA. Captura
 // (no bubble como el handler de archivos de mas arriba) para ganarle a CodeMirror y a
-// WebView2: andan con o sin foco en el editor y no chocan con ningun binding del editor. En
+// WebView2: funcionan con o sin foco en el editor y no chocan con ningun binding del editor. En
 // Windows Ctrl+D/Ctrl+T/Ctrl+Shift+H no estan tomados por CM6 (sus bindings emacs son
 // solo-Mac), pero capturamos igual por robustez y consistencia.
 export function initModeShortcuts(): void {

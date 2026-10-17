@@ -72,8 +72,6 @@ export interface Messages {
   "tabs.listLabel": string;
   "tabs.new": string;
   "tabs.newHint": string;
-  /// Nombre accesible del boton × de una pestaña ({name} = nombre del documento).
-  "tabs.close": string;
   "tabs.closeHint": string;
   /// Nombre accesible de una pestaña con cambios: el ● es solo visual.
   "tabs.unsavedLabel": string;
@@ -103,6 +101,8 @@ export interface Messages {
   "status.restored": Plural;
   "status.alreadyOpen": string;
   "status.pathOpenInOtherTab": string;
+  /// Un comando llego tarde a una pestaña que ya se cerro (codigo "unknown-document").
+  "status.documentClosed": string;
   "status.hemingway": string;
   "status.focusOn": string;
   "status.focusOff": string;
@@ -220,7 +220,6 @@ const ES: Messages = {
   "tabs.listLabel": "Documentos abiertos",
   "tabs.new": "Nueva pestaña",
   "tabs.newHint": "Nueva pestaña (Ctrl+T)",
-  "tabs.close": "Cerrar {name}",
   "tabs.closeHint": "Cerrar pestaña (Ctrl+W)",
   "tabs.unsavedLabel": "{name}, con cambios sin guardar",
   "tabs.restoredFrom": "Recuperado de {path}",
@@ -249,6 +248,7 @@ const ES: Messages = {
   "status.alreadyOpen": "ese archivo ya estaba abierto",
   "status.pathOpenInOtherTab":
     "ese archivo ya está abierto en otra pestaña — ciérrala o elige otro nombre",
+  "status.documentClosed": "esa pestaña ya estaba cerrada",
   "status.hemingway": "El texto no se puede borrar en modo Hemingway",
   "status.focusOn": "Modo enfoque activado",
   "status.focusOff": "Modo enfoque desactivado",
@@ -369,7 +369,6 @@ const EN: Messages = {
   "tabs.listLabel": "Open documents",
   "tabs.new": "New tab",
   "tabs.newHint": "New tab (Ctrl+T)",
-  "tabs.close": "Close {name}",
   "tabs.closeHint": "Close tab (Ctrl+W)",
   "tabs.unsavedLabel": "{name}, unsaved changes",
   "tabs.restoredFrom": "Recovered from {path}",
@@ -398,6 +397,7 @@ const EN: Messages = {
   "status.alreadyOpen": "that file was already open",
   "status.pathOpenInOtherTab":
     "that file is already open in another tab — close it or choose another name",
+  "status.documentClosed": "that tab was already closed",
   "status.hemingway": "Text cannot be deleted in Hemingway mode",
   "status.focusOn": "Focus mode on",
   "status.focusOff": "Focus mode off",

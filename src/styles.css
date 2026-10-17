@@ -431,12 +431,19 @@ body {
 }
 
 .tab {
-  position: relative;
   display: flex;
   align-items: center;
+  gap: 0.35rem;
   flex: 0 0 auto;
   max-width: 220px;
+  height: 100%;
+  padding: 0 0.35rem 0 0.75rem;
+  border: 0;
   border-right: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: default;
 }
 
 .tab.is-active {
@@ -444,28 +451,17 @@ body {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-.tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-width: 0;
-  height: 100%;
-  padding: 0 0.3rem 0 0.75rem;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+.tab-name,
+.tab-dirty {
   opacity: 0.75;
-  cursor: default;
 }
 
-.tab.is-active .tab-btn,
-.tab:hover .tab-btn {
+.tab.is-active .tab-name,
+.tab:hover .tab-name {
   opacity: 1;
 }
 
-.tab-btn:focus-visible,
-.tab-close:focus-visible,
+.tab:focus-visible,
 .tab-new:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -480,7 +476,6 @@ body {
 .tab-dirty {
   display: none;
   font-size: 0.7rem;
-  opacity: 0.8;
 }
 
 .tab.is-dirty .tab-dirty {
@@ -488,26 +483,19 @@ body {
 }
 
 /* La × se ve en la activa y al pasar el mouse: con muchas pestañas, una × en cada una
-   satura la barra. Sigue siendo clicable (y accesible por su aria-label) siempre. */
+   satura la barra. Es solo para el mouse (aria-hidden): el teclado cierra con Supr/Ctrl+W. */
 .tab-close {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  margin-right: 0.35rem;
-  padding: 0;
-  border: 0;
   border-radius: 4px;
-  background: transparent;
-  color: inherit;
   opacity: 0;
-  cursor: default;
 }
 
 .tab.is-active .tab-close,
-.tab:hover .tab-close,
-.tab-close:focus-visible {
+.tab:hover .tab-close {
   opacity: 0.7;
 }
 

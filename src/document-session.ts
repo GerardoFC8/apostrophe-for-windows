@@ -66,6 +66,18 @@ interface DiskChange {
 
 /// Error estable de "guardar como" sobre una ruta que ya tiene abierta otra pestaña.
 const PATH_OPEN_IN_OTHER_DOCUMENT = "path-open-in-other-document";
+/// Error estable de un comando sobre un documento que ya no existe (p.ej. la pestaña se
+/// cerro mientras su dialogo de "guardar como" estaba abierto).
+const UNKNOWN_DOCUMENT = "unknown-document";
+
+/// Texto visible de un error del backend. Los codigos estables se traducen con el
+/// catalogo (nunca se muestra el codigo crudo); el resto va detras de `prefix`.
+export function describeError(prefix: string, err: unknown): string {
+  const code = String(err);
+  if (code === PATH_OPEN_IN_OTHER_DOCUMENT) return t("status.pathOpenInOtherTab");
+  if (code === UNKNOWN_DOCUMENT) return t("status.documentClosed");
+  return `${prefix}: ${code}`;
+}
 
 const docName = document.querySelector<HTMLElement>("#doc-name")!;
 
@@ -75,7 +87,7 @@ const reloadBtn = document.querySelector<HTMLButtonElement>("#reload-btn")!;
 const keepBtn = document.querySelector<HTMLButtonElement>("#keep-btn")!;
 
 // --- Etiquetas de los dialogos nativos ---
-// Se arman aca y viajan por IPC: el backend no guarda copia (ADR-0001), asi sumar un idioma
+// Se arman aquí y viajan por IPC: el backend no guarda copia (ADR-0001), asi sumar un idioma
 // no toca Rust. Se resuelven en cada llamada para respetar el idioma activo en ese momento.
 interface ConfirmLabels {
   title: string;
@@ -139,7 +151,7 @@ function syncExternalBar(): void {
 
 // --- Enganche con el resto de la app ---
 // Al cambiar el documento mostrado hay que re-renderizar preview, contadores, resaltado y
-// corrector. Esos modulos no se importan aca (dependen de este): main.ts inyecta el refresco.
+// corrector. Esos modulos no se importan aquí (dependen de este): main.ts inyecta el refresco.
 let onActiveDocChanged: () => void = () => {};
 
 export function initDocumentSession(deps: { onActiveDocChanged: () => void }): void {
@@ -165,7 +177,7 @@ function applyStatus(st: DocStatus): void {
 }
 
 // Rutas y nombres de todas las pestañas segun el backend (tras guardar-como cambia la ruta,
-// y DocStatus solo trae el nombre). El dirty NO se toma de aca: el del backend puede ir
+// y DocStatus solo trae el nombre). El dirty NO se toma de aquí: el del backend puede ir
 // atrasado respecto del debounce.
 async function refreshPaths(): Promise<void> {
   try {
@@ -192,18 +204,12 @@ async function syncTab(tab: Tab): Promise<DocStatus | null> {
 }
 
 // M4: sincroniza la pestaña activa en el debounce. El indicador ● no es critico.
+// Sin pestaña activa (antes del arranque, o mientras se reemplaza la ultima cerrada) no se
+// envia nada: un set_content sin docId haria que el backend creara un documento oculto.
+// El arranque y replaceLastTab sincronizan en cuanto la pestaña existe.
 export async function syncDoc(): Promise<void> {
   const tab = activeTab();
-  if (tab) {
-    await syncTab(tab);
-    return;
-  }
-  // Antes del arranque no hay pestañas: el backend usa su documento activo.
-  try {
-    await invoke<DocStatus>("set_content", { text: getText() });
-  } catch {
-    /* no critico */
-  }
+  if (tab) await syncTab(tab);
 }
 
 // --- Activacion ---
@@ -250,55 +256,54 @@ export function newTab(): Promise<void> {
       activateTab(st.doc_id);
       flashStatus(t("status.newDoc"));
     } catch (err) {
-      flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+      flashStatus(describeError(t("error.generic"), err), 4000);
     }
   });
 }
 
-interface OpenTarget {
-  docId?: DocId;
-  newTab: boolean;
-  /** Pestaña en blanco que se ocupa con el archivo, si se reutiliza una. */
-  reused: DocId | null;
-}
-
-// Donde abrir: en la pestaña activa si esta en blanco (sin archivo, sin texto, sin cambios),
-// o en una nueva. Antes de reutilizarla se sincroniza, para que el backend la vea limpia y
-// no pida confirmar un descarte que no existe.
-async function openTarget(): Promise<OpenTarget> {
-  const tab = activeTab();
-  if (tab && isReusable(tab)) {
-    await syncTab(tab);
-    if (isReusable(tab)) return { docId: tab.id, newTab: false, reused: tab.id };
-  }
-  return { newTab: true, reused: null };
-}
-
-// Refleja un documento recien abierto. Tres casos segun el doc_id que devolvio el backend:
-// ya estaba abierto en otra pestaña (se activa, sin pisar su texto vivo), se cargo en la
-// pestaña en blanco reutilizada, o es una pestaña nueva.
-function applyOpened(opened: OpenedDoc, reused: DocId | null): void {
+// Refleja un documento recien abierto: si ya estaba abierto en otra pestaña se activa (sin
+// pisar su texto vivo, que es el del frontend); si no, es una pestaña nueva.
+function applyOpened(opened: OpenedDoc): void {
   const existing = getTab(opened.doc_id);
-  if (existing && opened.doc_id !== reused) {
+  if (existing) {
     activateTab(existing.id);
     flashStatus(t("status.alreadyOpen"));
     return;
   }
-  if (existing) {
-    updateTab(existing.id, {
-      path: opened.path,
-      fileName: opened.file_name,
-      dirty: false,
-      externalChange: false,
-      restoredFrom: null,
-    });
-    resetTab(existing, opened.content);
-    activateTab(existing.id);
-  } else {
-    addTab({ id: opened.doc_id, path: opened.path, fileName: opened.file_name }, opened.content);
-    activateTab(opened.doc_id);
-  }
+  addTab({ id: opened.doc_id, path: opened.path, fileName: opened.file_name }, opened.content);
+  activateTab(opened.doc_id);
   flashStatus(t("status.opened"));
+}
+
+// Quita una pestaña en blanco que quedo de sobra (sin archivo, sin texto, sin cambios).
+// Se le pasa su texto: si el backend la viera modificada, confirmaria en vez de perder nada.
+async function discardBlankTab(id: DocId): Promise<void> {
+  const tab = getTab(id);
+  if (!tab || !isReusable(tab)) return;
+  try {
+    const closed = await invoke<boolean>("close_document", {
+      docId: id,
+      labels: closeTabLabels(tabDisplayName(tab)),
+      text: tabText(tab),
+    });
+    if (closed) removeTab(id);
+  } catch {
+    /* no critico: queda una pestaña vacia de mas */
+  }
+}
+
+// Abrir SIEMPRE en una pestaña nueva y, recien cuando el backend responde, decidir si la
+// pestaña en blanco de la que se partio sobra. La decision NO se toma antes: el selector
+// de archivos no es modal para el editor, y lo escrito mientras estaba abierto convierte
+// la pestaña en blanco en un documento con texto que no se debe pisar.
+async function openInNewTab(request: () => Promise<OpenedDoc | null>): Promise<void> {
+  const start = activeTab();
+  const blank = start && isReusable(start) ? start.id : null;
+  const opened = await request();
+  if (!opened) return; // cancelado
+  const isNew = !getTab(opened.doc_id);
+  applyOpened(opened);
+  if (isNew && blank !== null && blank !== opened.doc_id) await discardBlankTab(blank);
 }
 
 // M4: abrir un .md con el dialogo nativo, en su propia pestaña.
@@ -306,16 +311,11 @@ export function openDoc(): Promise<void> {
   return serialized(async () => {
     await ready;
     try {
-      const target = await openTarget();
-      const opened = await invoke<OpenedDoc | null>("open_document", {
-        labels: openLabels(),
-        docId: target.docId,
-        newTab: target.newTab,
-      });
-      if (!opened) return; // cancelado
-      applyOpened(opened, target.reused);
+      await openInNewTab(() =>
+        invoke<OpenedDoc | null>("open_document", { labels: openLabels(), newTab: true }),
+      );
     } catch (err) {
-      flashStatus(`${t("error.open")}: ${String(err)}`, 4000);
+      flashStatus(describeError(t("error.open"), err), 4000);
     }
   });
 }
@@ -326,40 +326,31 @@ export function openPath(path: string): Promise<void> {
   return serialized(async () => {
     await ready;
     try {
-      const target = await openTarget();
-      const opened = await invoke<OpenedDoc | null>("open_path", {
-        path,
-        labels: openLabels(),
-        docId: target.docId,
-        newTab: target.newTab,
-      });
-      if (!opened) return;
-      applyOpened(opened, target.reused);
+      await openInNewTab(() =>
+        invoke<OpenedDoc | null>("open_path", { path, labels: openLabels(), newTab: true }),
+      );
     } catch (err) {
-      flashStatus(`${t("error.open")}: ${String(err)}`, 4000);
+      flashStatus(describeError(t("error.open"), err), 4000);
     }
   });
 }
 
 // --- Guardar ---
 
+// Si el archivo elegido ya lo tiene otra pestaña (dos documentos con la misma ruta se
+// pisarian al guardar), el backend no dice cual es — la ruta la eligio su dialogo —, asi
+// que solo se explica (describeError). Se deja el aviso mas tiempo: hay que leerlo.
 function reportSaveError(err: unknown): void {
-  // El archivo elegido ya lo tiene otra pestaña: dos documentos con la misma ruta se
-  // pisarian al guardar. El backend no dice cual es (la ruta la eligio el dialogo), asi que
-  // solo se explica.
-  if (String(err) === PATH_OPEN_IN_OTHER_DOCUMENT) {
-    flashStatus(t("status.pathOpenInOtherTab"), 6000);
-    return;
-  }
-  flashStatus(`${t("error.save")}: ${String(err)}`, 4000);
+  flashStatus(describeError(t("error.save"), err), 6000);
 }
 
 async function save(command: "save_document" | "save_document_as"): Promise<void> {
   await ready;
   const tab = activeTab();
+  if (!tab) return; // sin docId el backend crearia un documento oculto
   const text = getText();
   try {
-    const st = await invoke<DocStatus | null>(command, { text, docId: tab?.id });
+    const st = await invoke<DocStatus | null>(command, { text, docId: tab.id });
     if (!st) return; // cancelado
     applyStatus(st);
     flashStatus(t("status.saved"));
@@ -381,7 +372,10 @@ export function saveDocAs(): Promise<void> {
 
 // --- Cerrar pestaña ---
 
-// Pestañas con un dialogo de cierre abierto: un segundo Ctrl+W o clic no apila otro.
+// Pestañas con un cierre PEDIDO (en cola o con su dialogo abierto). Se marca al llamar, no
+// dentro de la cola: asi un segundo Ctrl+W sobre la misma pestaña se ignora en vez de
+// quedar encolado y, al terminar el primero, cerrar la pestaña que haya quedado activa (o
+// volver a mostrar el dialogo que el usuario acaba de cancelar).
 const closing = new Set<DocId>();
 
 // Tras cerrar la ultima pestaña queda una en blanco: la app nunca se queda sin documento.
@@ -391,19 +385,22 @@ async function replaceLastTab(): Promise<void> {
     const st = await invoke<DocStatus | null>("new_document", { labels: newLabels(), newTab: true });
     if (st) adoptViewAsTab({ id: st.doc_id, fileName: st.file_name, dirty: st.dirty });
   } catch (err) {
-    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+    flashStatus(describeError(t("error.generic"), err), 4000);
   }
-  afterActivation(true);
+  afterActivation(true); // incluye el syncDoc del texto escrito mientras tanto
 }
 
 /// Cierra la pestaña `id` (la activa si no se indica). Si tiene cambios, el backend confirma.
+/// La pestaña se fija AL LLAMAR: nunca se cierra otra distinta de la que el usuario pidio.
 export function closeTab(id?: DocId): Promise<void> {
+  const targetId = id ?? activeDocId();
+  if (targetId === undefined || closing.has(targetId)) return Promise.resolve();
+  closing.add(targetId);
   return serialized(async () => {
-    await ready;
-    const tab = id !== undefined ? getTab(id) : activeTab();
-    if (!tab || closing.has(tab.id)) return;
-    closing.add(tab.id);
     try {
+      await ready;
+      const tab = getTab(targetId);
+      if (!tab) return; // ya se cerro por otra via
       const closed = await invoke<boolean>("close_document", {
         docId: tab.id,
         labels: closeTabLabels(tabDisplayName(tab)),
@@ -414,9 +411,9 @@ export function closeTab(id?: DocId): Promise<void> {
       if (next === null) await replaceLastTab();
       else if (wasActive) activateTab(next);
     } catch (err) {
-      flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+      flashStatus(describeError(t("error.generic"), err), 4000);
     } finally {
-      closing.delete(tab.id);
+      closing.delete(targetId);
     }
   });
 }
@@ -525,7 +522,7 @@ export function initExternalChangeWatcher(): void {
     if (!tab) return;
     void reloadTab(tab)
       .then(() => flashStatus(t("status.reloaded"), 3000))
-      .catch((err) => flashStatus(`${t("error.open")}: ${String(err)}`, 4000));
+      .catch((err) => flashStatus(describeError(t("error.open"), err), 4000));
   });
   keepBtn.addEventListener("click", () => {
     // El usuario elige mantener sus cambios; el proximo Ctrl+S sobrescribira el cambio externo.
@@ -538,8 +535,8 @@ export function initExternalChangeWatcher(): void {
 // --- Capa B + M8.4a: arranque ---
 
 // Restaura un snapshot huerfano en una pestaña: la activa si esta en blanco (la del
-// arranque), o una nueva. Igual que con un solo documento: el contenido vuelve como
-// documento SIN TITULO y modificado (hay que guardarlo), con el aviso visible desde ya.
+// arranque sin archivos), o una nueva. Igual que con un solo documento: el contenido vuelve
+// como documento SIN TITULO y modificado (hay que guardarlo), con el aviso visible desde ya.
 async function restoreSnapshot(snapshot: RestoredSnapshot): Promise<DocId | null> {
   let tab = activeTab();
   if (!isReusable(tab)) {
@@ -557,10 +554,11 @@ async function restoreSnapshot(snapshot: RestoredSnapshot): Promise<DocId | null
   return tab.id;
 }
 
-// Arma las pestañas iniciales. Precedencia: (1) archivos de la linea de comandos /
-// asociacion .md (take_pending_files, ya cargados en el workspace; el primero activo),
-// (2) snapshots de un crash (take_pending_restores, uno por pestaña, el mas reciente
-// activo). Si se abrio con archivos, los snapshots NO se restauran (igual que antes).
+// Arma las pestañas iniciales: (1) los archivos de la linea de comandos / asociacion .md
+// (take_pending_files, ya cargados en el workspace), y DESPUES (2) los snapshots de un
+// crash (take_pending_restores, uno por pestaña). Con pestañas no hay que elegir entre
+// ambos: abrir la app con un archivo no debe perder el trabajo recuperado. Activa queda la
+// del primer archivo; sin archivos, la del snapshot mas reciente.
 export async function restoreInitialDocument(): Promise<void> {
   try {
     const files = await invoke<OpenedDoc[]>("take_pending_files");
@@ -577,21 +575,22 @@ export async function restoreInitialDocument(): Promise<void> {
         addTab(init, text ?? "");
       }
     }
-    if (first !== undefined) void invoke("activate_document", { docId: first }).catch(() => {});
 
-    if (files.length === 0) {
-      const restores = await invoke<RestoredSnapshot[]>("take_pending_restores");
-      const restored: DocId[] = [];
-      for (const snapshot of restores) {
-        const id = await restoreSnapshot(snapshot);
-        if (id !== null) restored.push(id);
-      }
-      if (restored.length > 0) {
-        showTab(restored[0]); // el mas reciente
-        void invoke("activate_document", { docId: restored[0] }).catch(() => {});
-        flashStatus(tp("status.restored", restored.length), 5000);
-      }
+    // Con archivos, la pestaña activa es la del primero y no es reutilizable: cada
+    // snapshot va a una pestaña nueva, detras de los archivos.
+    const restores = await invoke<RestoredSnapshot[]>("take_pending_restores");
+    const restored: DocId[] = [];
+    for (const snapshot of restores) {
+      const id = await restoreSnapshot(snapshot);
+      if (id !== null) restored.push(id);
     }
+    const active = files.length > 0 ? first : (restored[0] ?? first);
+    if (active !== undefined) {
+      showTab(active);
+      // new_document deja activo en el backend al ultimo creado: se le fija el real.
+      void invoke("activate_document", { docId: active }).catch(() => {});
+    }
+    if (restored.length > 0) flashStatus(tp("status.restored", restored.length), 5000);
   } catch {
     /* no critico: si falla, la app queda con el editor vacio */
   }
