@@ -51,7 +51,10 @@ mod tests {
         let d = typst_document("$ x $", "#2e3436");
         assert!(d.contains("width: auto"), "sin esto saldria una A4: {d}");
         assert!(d.contains("height: auto"));
-        assert!(d.contains("fill: none"), "el fondo debe ser transparente: {d}");
+        assert!(
+            d.contains("fill: none"),
+            "el fondo debe ser transparente: {d}"
+        );
     }
 
     #[test]

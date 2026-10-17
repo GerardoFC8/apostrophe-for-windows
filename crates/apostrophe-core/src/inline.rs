@@ -100,7 +100,9 @@ mod tests {
 
     /// Posicion (en caracteres) de la primera aparicion de `needle`, mas `plus`.
     fn at(text: &str, needle: &str, plus: usize) -> usize {
-        let byte = text.find(needle).expect("el needle deberia estar en el texto");
+        let byte = text
+            .find(needle)
+            .expect("el needle deberia estar en el texto");
         text[..byte].chars().count() + plus
     }
 
@@ -173,7 +175,9 @@ mod tests {
         let t = "la formula $E = mc^2$ es famosa";
         assert_eq!(
             resolve_at(t, at(t, "E = mc", 1)),
-            Some(InlineTarget::Math { source: "E = mc^2".into() })
+            Some(InlineTarget::Math {
+                source: "E = mc^2".into()
+            })
         );
     }
 
@@ -183,7 +187,10 @@ mod tests {
         // fuera del enlace y no se reconoceria nada.
         let t = "Añoñado ñandú [destino](https://example.com) fin";
         let pos = at(t, "destino", 2);
-        assert!(pos < t.find("destino").unwrap(), "el indice de char va antes que el de byte");
+        assert!(
+            pos < t.find("destino").unwrap(),
+            "el indice de char va antes que el de byte"
+        );
         assert_eq!(
             resolve_at(t, pos),
             Some(InlineTarget::Link {
@@ -217,7 +224,10 @@ mod tests {
         let t = "[uno](a.md) y [dos](b.md)";
         assert_eq!(
             resolve_at(t, at(t, "dos", 1)),
-            Some(InlineTarget::Link { url: "b.md".into(), text: "dos".into() })
+            Some(InlineTarget::Link {
+                url: "b.md".into(),
+                text: "dos".into()
+            })
         );
     }
 }

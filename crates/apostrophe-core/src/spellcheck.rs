@@ -397,7 +397,11 @@ mod tests {
         // y las palabras entre los precios SI se chequean (review M6).
         let dict = FakeDict::new(&["cuesta", "y", "vale", "pesos"]);
         let r = SpellChecker::check_text(&dict, "cuesta $5 y vale $7 zzz pesos", false);
-        assert_eq!(r.len(), 1, "solo 'zzz' (lo de entre precios no se silencia)");
+        assert_eq!(
+            r.len(),
+            1,
+            "solo 'zzz' (lo de entre precios no se silencia)"
+        );
         assert_eq!(r[0].word, "zzz");
     }
 
@@ -433,11 +437,18 @@ mod tests {
     #[test]
     fn integration_real_es_dictionary() {
         // Carga el es_ES real (si esta provisionado) y verifica el motor end-to-end.
-        let aff_p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri/dictionaries/es.aff");
-        let dic_p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri/dictionaries/es.dic");
-        let (Ok(aff), Ok(dic)) =
-            (std::fs::read_to_string(aff_p), std::fs::read_to_string(dic_p))
-        else {
+        let aff_p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../src-tauri/dictionaries/es.aff"
+        );
+        let dic_p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../src-tauri/dictionaries/es.dic"
+        );
+        let (Ok(aff), Ok(dic)) = (
+            std::fs::read_to_string(aff_p),
+            std::fs::read_to_string(dic_p),
+        ) else {
             // La CI define ELISION_REQUIRE_SIDECARS porque ahi siempre lo provisiona: un
             // salto silencioso esconderia una regresion.
             if std::env::var_os("ELISION_REQUIRE_SIDECARS").is_some() {

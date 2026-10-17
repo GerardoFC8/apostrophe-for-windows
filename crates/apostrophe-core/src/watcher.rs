@@ -27,7 +27,10 @@ pub fn is_relevant_change(watched: &Path, event_path: &Path) -> bool {
 /// ¿Este tipo de cambio amerita avisar al usuario? Modify/Remove/Rename si; eventos de
 /// metadata/acceso (Other) no.
 pub fn should_notify_frontend(kind: ChangeKind) -> bool {
-    matches!(kind, ChangeKind::Modify | ChangeKind::Remove | ChangeKind::Rename)
+    matches!(
+        kind,
+        ChangeKind::Modify | ChangeKind::Remove | ChangeKind::Rename
+    )
 }
 
 #[cfg(test)]

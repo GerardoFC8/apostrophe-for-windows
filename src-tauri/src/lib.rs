@@ -57,7 +57,12 @@ async fn preview_markdown(
     text: String,
 ) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+    let doc_dir = {
+        doc.lock()
+            .unwrap()
+            .path()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+    };
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!(
         "apostrophe-preview-{}-{}.md",
@@ -235,8 +240,16 @@ async fn render_math(
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir();
     let md = dir.join(format!("apostrophe-math-{}-{}.md", std::process::id(), seq));
-    let typ = dir.join(format!("apostrophe-math-{}-{}.typ", std::process::id(), seq));
-    let svg = dir.join(format!("apostrophe-math-{}-{}.svg", std::process::id(), seq));
+    let typ = dir.join(format!(
+        "apostrophe-math-{}-{}.typ",
+        std::process::id(),
+        seq
+    ));
+    let svg = dir.join(format!(
+        "apostrophe-math-{}-{}.svg",
+        std::process::id(),
+        seq
+    ));
 
     // Paso 1: LaTeX -> sintaxis typst, con el mismo pandoc que ya produce el preview.
     std::fs::write(&md, format!("${source}$"))
@@ -303,7 +316,12 @@ async fn render_math(
 #[tauri::command]
 async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+    let doc_dir = {
+        doc.lock()
+            .unwrap()
+            .path()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+    };
     tauri::async_runtime::spawn_blocking(move || image_data_uri(&url, doc_dir.as_deref()))
         .await
         .map_err(|_| "unreadable".to_string())?
@@ -328,7 +346,12 @@ async fn pick_image(
     filter_label: String,
 ) -> Result<Option<String>, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+    let doc_dir = {
+        doc.lock()
+            .unwrap()
+            .path()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+    };
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -343,7 +366,9 @@ async fn pick_image(
     let Some(file) = picked else {
         return Ok(None); // el usuario cancelo el picker
     };
-    let path = file.into_path().map_err(|e| format!("ruta invalida: {e}"))?;
+    let path = file
+        .into_path()
+        .map_err(|e| format!("ruta invalida: {e}"))?;
     Ok(Some(apostrophe_core::image::image_markdown(
         &path,
         doc_dir.as_deref(),
@@ -372,7 +397,9 @@ type Doc = Mutex<DocumentStore>;
 
 /// Watcher del archivo abierto. Se re-arma al abrir/guardar-como (cambia el path) y
 /// se suspende+re-arma alrededor de nuestros propios guardados (evita el auto-disparo).
-struct FileWatcher(Mutex<Option<Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>>>);
+struct FileWatcher(
+    Mutex<Option<Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>>>,
+);
 
 /// Suspende el watcher (lo dropea -> deja de observar). Se llama ANTES de un write
 /// propio para que notify no detecte nuestro guardado como cambio externo.
@@ -433,9 +460,7 @@ fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
             for debounced in events {
                 let kind = to_change_kind(&debounced.event.kind);
                 for event_path in &debounced.event.paths {
-                    if is_relevant_change(&watched, event_path)
-                        && should_notify_frontend(kind)
-                    {
+                    if is_relevant_change(&watched, event_path) && should_notify_frontend(kind) {
                         let _ = app_handle.emit("file-changed-on-disk", ());
                         return; // un evento por batch es suficiente
                     }
@@ -544,8 +569,7 @@ fn load_path_into_store(
     doc: &Doc,
 ) -> Result<OpenedDoc, String> {
     let path = absolute_doc_path(path);
-    let bytes =
-        std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
     let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
     let file_name = path
         .file_name()
@@ -578,8 +602,7 @@ fn recents_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("no se pudo resolver app_local_data_dir: {e}"))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("no se pudo crear el dir de datos: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("no se pudo crear el dir de datos: {e}"))?;
     Ok(dir.join("recents.json"))
 }
 
@@ -653,9 +676,7 @@ async fn open_document(
     labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc, labels)
-    .await?
-    {
+    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
         return Ok(None); // el usuario cancelo: NO se pierde nada
     }
 
@@ -695,9 +716,7 @@ async fn open_path(
     labels: ConfirmLabels,
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc, labels)
-    .await?
-    {
+    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
         return Ok(None);
     }
     let result = load_path_into_store(&app, PathBuf::from(path), &doc).map(Some);
@@ -725,8 +744,7 @@ async fn confirm_close(
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<bool, String> {
     doc.lock().unwrap().set_content(text);
-    let proceed = confirm_discard_if_dirty(&app, &doc, labels)
-    .await?;
+    let proceed = confirm_discard_if_dirty(&app, &doc, labels).await?;
 
     if proceed {
         // Cierre limpio o descartado: marcar la sesion como cerrando ANTES de borrar el
@@ -755,9 +773,7 @@ async fn new_document(
     doc: tauri::State<'_, Doc>,
 ) -> Result<Option<DocStatus>, String> {
     doc.lock().unwrap().set_content(text);
-    if !confirm_discard_if_dirty(&app, &doc, labels)
-    .await?
-    {
+    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
         return Ok(None);
     }
     let status = {
@@ -768,7 +784,7 @@ async fn new_document(
             dirty: store.is_dirty(),
         }
     }; // guard se suelta aqui
-    // M8.4b: soltar el watcher (doc nuevo sin path: no hay archivo que observar).
+       // M8.4b: soltar el watcher (doc nuevo sin path: no hay archivo que observar).
     suppress_watcher(&app.state::<FileWatcher>());
     Ok(Some(status))
 }
@@ -824,8 +840,8 @@ async fn save_document(
             dirty: false,
         }
     }; // guard se suelta aqui
-    // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente para no
-    // restaurar contenido ya guardado si hay un crash en los proximos segundos (best-effort).
+       // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente para no
+       // restaurar contenido ya guardado si hay un crash en los proximos segundos (best-effort).
     if let Ok(dir) = snapshots_dir(&app) {
         let id = session.id.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -888,7 +904,7 @@ async fn save_document_as(
             dirty: false,
         }
     }; // guard se suelta aqui
-    // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente (best-effort).
+       // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente (best-effort).
     if let Ok(dir) = snapshots_dir(&app) {
         let id = session.id.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -921,7 +937,12 @@ async fn export_document(
 
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
     // Es contra el que se resuelven las rutas relativas de las imagenes.
-    let doc_dir = { doc.lock().unwrap().path().and_then(|p| p.parent().map(Path::to_path_buf)) };
+    let doc_dir = {
+        doc.lock()
+            .unwrap()
+            .path()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+    };
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -952,9 +973,7 @@ async fn export_document(
         // (p. ej. `.pdf`, que necesita un motor externo que no se distribuye).
         return Err(format!(
             "No se puede exportar a «{extension}». Formatos disponibles: {}.",
-            ExportFormat::ALL
-                .map(|f| f.extension())
-                .join(", ")
+            ExportFormat::ALL.map(|f| f.extension()).join(", ")
         ));
     };
     let out_str = out_path.to_string_lossy().into_owned();
@@ -973,11 +992,8 @@ async fn export_document(
     // del plugin shell: misma resolucion de ruta del sidecar y, en Windows, sin consola.
     // Lanzar procesos y esperarlos es bloqueante: va fuera del hilo de eventos.
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
-    let work_dir = std::env::temp_dir().join(format!(
-        "apostrophe-export-{}-{}",
-        std::process::id(),
-        seq
-    ));
+    let work_dir =
+        std::env::temp_dir().join(format!("apostrophe-export-{}-{}", std::process::id(), seq));
     let app2 = app.clone();
     let job_out = out_path.clone();
     let job_dir = doc_dir.clone();
@@ -1138,7 +1154,8 @@ fn snapshots_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_local_data_dir()
         .map_err(|e| format!("no se pudo resolver app_local_data_dir: {e}"))?
         .join("snapshots");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("no se pudo crear el dir de snapshots: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("no se pudo crear el dir de snapshots: {e}"))?;
     Ok(dir)
 }
 
@@ -1157,7 +1174,10 @@ fn write_snapshot_files(
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
         .as_secs();
-    let meta = apostrophe_core::snapshot::SnapshotMeta { original_path, saved_at };
+    let meta = apostrophe_core::snapshot::SnapshotMeta {
+        original_path,
+        saved_at,
+    };
     let meta_json =
         serde_json::to_string(&meta).map_err(|e| format!("no se pudo serializar metadata: {e}"))?;
     let meta_path = dir.join(apostrophe_core::snapshot::meta_file_name(id));
@@ -1186,8 +1206,11 @@ fn find_latest_orphan(dir: &Path) -> Option<(String, RestoredSnapshot)> {
             continue; // no es un .snapshot -> saltar
         };
         let meta_path = dir.join(apostrophe_core::snapshot::meta_file_name(id));
-        let Ok(meta_bytes) = std::fs::read(&meta_path) else { continue };
-        let Ok(meta) = serde_json::from_slice::<apostrophe_core::snapshot::SnapshotMeta>(&meta_bytes)
+        let Ok(meta_bytes) = std::fs::read(&meta_path) else {
+            continue;
+        };
+        let Ok(meta) =
+            serde_json::from_slice::<apostrophe_core::snapshot::SnapshotMeta>(&meta_bytes)
         else {
             continue; // metadata corrupta -> saltar
         };
@@ -1206,7 +1229,13 @@ fn find_latest_orphan(dir: &Path) -> Option<(String, RestoredSnapshot)> {
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
 
-    Some((id, RestoredSnapshot { content, original_file_name }))
+    Some((
+        id,
+        RestoredSnapshot {
+            content,
+            original_file_name,
+        },
+    ))
 }
 
 /// Escribe (o borra) el snapshot de la sesion segun la politica de should_snapshot.
@@ -1256,7 +1285,9 @@ fn take_pending_restore(pending: tauri::State<'_, PendingRestore>) -> Option<Res
 /// Se llama al arrancar, despues de cargar el huerfano en memoria, para evitar que
 /// crashes multiples acumulen archivos indefinidamente.
 fn purge_snapshots_dir(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.ends_with(".snapshot") || name.ends_with(".meta.json") {
@@ -1427,7 +1458,10 @@ mod tests {
         // seria `""` y no serviria para resolver sus imagenes ni como directorio actual.
         let path = absolute_doc_path(std::path::PathBuf::from("nota.md"));
         assert!(path.is_absolute(), "{path:?}");
-        assert_eq!(path.parent(), Some(std::env::current_dir().unwrap().as_path()));
+        assert_eq!(
+            path.parent(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
         assert_eq!(path.file_name().unwrap(), "nota.md");
     }
 
@@ -1439,7 +1473,10 @@ mod tests {
 
     #[test]
     fn file_arg_devuelve_la_ruta_tras_el_exe() {
-        let args = vec!["apostrophe.exe".to_string(), "C:\\docs\\nota.md".to_string()];
+        let args = vec![
+            "apostrophe.exe".to_string(),
+            "C:\\docs\\nota.md".to_string(),
+        ];
         assert_eq!(file_arg(&args).as_deref(), Some("C:\\docs\\nota.md"));
     }
 

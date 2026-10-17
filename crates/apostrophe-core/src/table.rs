@@ -172,7 +172,16 @@ pub fn align_table(text: &str) -> Option<String> {
     out.push_str(&render(&header));
     out.push('\n');
     let sep: Vec<String> = (0..header.len())
-        .map(|i| format!(" {} ", pad(&separator_cell(colons[i], widths[i]), widths[i], Align::Left)))
+        .map(|i| {
+            format!(
+                " {} ",
+                pad(
+                    &separator_cell(colons[i], widths[i]),
+                    widths[i],
+                    Align::Left
+                )
+            )
+        })
         .collect();
     out.push_str(&format!("|{}|", sep.join("|")));
     for row in &body {
@@ -474,7 +483,10 @@ mod tests {
     fn las_dimensiones_se_recortan_al_maximo() {
         let t = empty_table(99, 99);
         assert_eq!(t.lines().count(), MAX_DIMENSION + 2);
-        assert_eq!(t.lines().next().unwrap().matches('|').count(), MAX_DIMENSION + 1);
+        assert_eq!(
+            t.lines().next().unwrap().matches('|').count(),
+            MAX_DIMENSION + 1
+        );
     }
 
     #[test]
@@ -531,13 +543,20 @@ mod tests {
         // Tabla escrita a mano a la que le falta una celda: se rellena en vez de descuadrar.
         let t = align_table("| a | b |\n|---|---|\n| 1 |").unwrap();
         let ultima = t.lines().last().unwrap();
-        assert_eq!(ultima.matches('|').count(), 3, "deberia tener dos celdas: {ultima}");
+        assert_eq!(
+            ultima.matches('|').count(),
+            3,
+            "deberia tener dos celdas: {ultima}"
+        );
     }
 
     #[test]
     fn tolera_tablas_sin_barras_en_los_bordes() {
         let t = align_table("a | b\n--- | ---\n1 | 2");
-        assert!(t.is_some(), "una tabla sin barras externas sigue siendo una tabla");
+        assert!(
+            t.is_some(),
+            "una tabla sin barras externas sigue siendo una tabla"
+        );
         assert!(t.unwrap().starts_with('|'), "la salida SI las normaliza");
     }
 

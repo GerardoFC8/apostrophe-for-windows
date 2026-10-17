@@ -183,7 +183,10 @@ impl ExportFormat {
                     // `rgb(content-to-string(linkcolor))`, y `[#3584e4]` en typst es
                     // CODIGO: evalua 3584e4 como notacion cientifica (35 840 000), el
                     // color sale invalido y el texto del enlace se vuelve invisible.
-                    args.push(format!("--variable=linkcolor:{}", color.trim_start_matches('#')));
+                    args.push(format!(
+                        "--variable=linkcolor:{}",
+                        color.trim_start_matches('#')
+                    ));
                 }
                 args
             }
@@ -303,7 +306,14 @@ mod tests {
     fn preview_args_default_matches_spike() {
         assert_eq!(
             preview_args(&PreviewOptions::default()),
-            ["--from", "markdown", "--to", "html5", "--standalone", "--mathjax"]
+            [
+                "--from",
+                "markdown",
+                "--to",
+                "html5",
+                "--standalone",
+                "--mathjax"
+            ]
         );
     }
 
@@ -342,11 +352,21 @@ mod tests {
 
     #[test]
     fn export_args_html_tiene_output_y_standalone() {
-        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
+        let args = export_args(
+            ExportFormat::Html,
+            "/tmp/out.html",
+            &ExportOptions::default(),
+        );
         assert_eq!(
             args,
             [
-                "--from", "markdown", "--to", "html5", "--standalone", "--mathjax", "--output",
+                "--from",
+                "markdown",
+                "--to",
+                "html5",
+                "--standalone",
+                "--mathjax",
+                "--output",
                 "/tmp/out.html"
             ]
         );
@@ -381,7 +401,11 @@ mod tests {
     #[test]
     fn export_args_docx_usa_papersize_y_no_standalone() {
         assert_eq!(
-            export_args(ExportFormat::Docx, "/tmp/out.docx", &ExportOptions::default()),
+            export_args(
+                ExportFormat::Docx,
+                "/tmp/out.docx",
+                &ExportOptions::default()
+            ),
             [
                 "--from",
                 "markdown",
@@ -397,12 +421,36 @@ mod tests {
     #[test]
     fn export_args_latex_y_epub_son_standalone_sin_mathjax() {
         assert_eq!(
-            export_args(ExportFormat::Latex, "/tmp/out.tex", &ExportOptions::default()),
-            ["--from", "markdown", "--to", "latex", "--standalone", "--output", "/tmp/out.tex"]
+            export_args(
+                ExportFormat::Latex,
+                "/tmp/out.tex",
+                &ExportOptions::default()
+            ),
+            [
+                "--from",
+                "markdown",
+                "--to",
+                "latex",
+                "--standalone",
+                "--output",
+                "/tmp/out.tex"
+            ]
         );
         assert_eq!(
-            export_args(ExportFormat::Epub, "/tmp/out.epub", &ExportOptions::default()),
-            ["--from", "markdown", "--to", "epub", "--standalone", "--output", "/tmp/out.epub"]
+            export_args(
+                ExportFormat::Epub,
+                "/tmp/out.epub",
+                &ExportOptions::default()
+            ),
+            [
+                "--from",
+                "markdown",
+                "--to",
+                "epub",
+                "--standalone",
+                "--output",
+                "/tmp/out.epub"
+            ]
         );
     }
 
@@ -415,7 +463,11 @@ mod tests {
         //
         // Las imagenes del HTML se incrustan en el adaptador con el mismo camino que el
         // preview (`rewrite_img_srcs`), que toca solo los `<img>`. Ver `embed_html_images`.
-        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
+        let args = export_args(
+            ExportFormat::Html,
+            "/tmp/out.html",
+            &ExportOptions::default(),
+        );
         assert!(!args.iter().any(|a| a.contains("embed-resources")));
     }
 
@@ -432,7 +484,10 @@ mod tests {
                 ..Default::default()
             };
             let args = export_args(format, "/tmp/out", &opts);
-            assert!(!args.iter().any(|a| a.starts_with("--resource-path")), "{format:?}");
+            assert!(
+                !args.iter().any(|a| a.starts_with("--resource-path")),
+                "{format:?}"
+            );
         }
     }
 
@@ -463,9 +518,18 @@ mod tests {
 
     #[test]
     fn from_extension_tolera_mayusculas_y_punto() {
-        assert_eq!(ExportFormat::from_extension(".DOCX"), Some(ExportFormat::Docx));
-        assert_eq!(ExportFormat::from_extension("Tex"), Some(ExportFormat::Latex));
-        assert_eq!(ExportFormat::from_extension("HTML"), Some(ExportFormat::Html));
+        assert_eq!(
+            ExportFormat::from_extension(".DOCX"),
+            Some(ExportFormat::Docx)
+        );
+        assert_eq!(
+            ExportFormat::from_extension("Tex"),
+            Some(ExportFormat::Latex)
+        );
+        assert_eq!(
+            ExportFormat::from_extension("HTML"),
+            Some(ExportFormat::Html)
+        );
     }
 
     #[test]
@@ -485,7 +549,10 @@ mod tests {
         let args = export_args(ExportFormat::Pdf, "/tmp/trabajo/documento.typ", &opts);
         assert_eq!(&args[..4], ["--from", "markdown", "--to", "typst"]);
         assert!(args.contains(&"--standalone".to_string()));
-        assert_eq!(args[args.len() - 2..], ["--output", "/tmp/trabajo/documento.typ"]);
+        assert_eq!(
+            args[args.len() - 2..],
+            ["--output", "/tmp/trabajo/documento.typ"]
+        );
     }
 
     #[test]
@@ -529,7 +596,10 @@ mod tests {
     #[test]
     fn los_defaults_de_recursos_no_contaminan_otros_formatos() {
         // Fuera del PDF, pandoc corre desde la carpeta del documento y no los necesita.
-        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+        for format in ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Pdf)
+        {
             let args = export_args(
                 format,
                 "/tmp/out",
@@ -538,7 +608,10 @@ mod tests {
                     ..Default::default()
                 },
             );
-            assert!(!args.iter().any(|a| a.starts_with("--defaults")), "{format:?}");
+            assert!(
+                !args.iter().any(|a| a.starts_with("--defaults")),
+                "{format:?}"
+            );
         }
     }
 
@@ -546,9 +619,15 @@ mod tests {
     fn la_extraccion_de_imagenes_no_contamina_otros_formatos() {
         // DOCX, ODT y EPUB ya meten la imagen en su propio paquete; en HTML y LaTeX
         // `--extract-media` reescribiria el `src` a una carpeta temporal que se borra.
-        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+        for format in ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Pdf)
+        {
             let args = export_args(format, "/tmp/out", &ExportOptions::default());
-            assert!(!args.iter().any(|a| a.starts_with("--extract-media")), "{format:?}");
+            assert!(
+                !args.iter().any(|a| a.starts_with("--extract-media")),
+                "{format:?}"
+            );
         }
     }
 
@@ -586,10 +665,15 @@ mod tests {
 
     #[test]
     fn la_tipografia_del_pdf_no_contamina_otros_formatos() {
-        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+        for format in ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Pdf)
+        {
             let args = export_args(format, "/tmp/out", &ExportOptions::default());
             assert!(
-                !args.iter().any(|a| a.contains("mainfont") || a.contains("linestretch")),
+                !args
+                    .iter()
+                    .any(|a| a.contains("mainfont") || a.contains("linestretch")),
                 "{format:?} no deberia recibir tipografia de PDF"
             );
         }
@@ -621,7 +705,10 @@ mod tests {
     #[test]
     fn el_color_de_enlace_no_contamina_otros_formatos() {
         // En HTML el color ya viaja dentro de la hoja de estilos.
-        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Pdf) {
+        for format in ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Pdf)
+        {
             let args = export_args(
                 format,
                 "/tmp/out",
@@ -690,14 +777,21 @@ mod tests {
 
     #[test]
     fn html_sin_hoja_de_estilos_omite_el_flag() {
-        let args = export_args(ExportFormat::Html, "/tmp/out.html", &ExportOptions::default());
+        let args = export_args(
+            ExportFormat::Html,
+            "/tmp/out.html",
+            &ExportOptions::default(),
+        );
         assert!(!args.iter().any(|a| a.starts_with("--include-in-header")));
     }
 
     #[test]
     fn la_hoja_de_estilos_no_contamina_otros_formatos() {
         // Solo HTML entiende un <style>: inyectarlo en un DOCX o un PDF no tiene sentido.
-        for format in ExportFormat::ALL.into_iter().filter(|f| *f != ExportFormat::Html) {
+        for format in ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Html)
+        {
             let args = export_args(
                 format,
                 "/tmp/out",
@@ -730,6 +824,10 @@ mod tests {
         exts.sort_unstable();
         let total = exts.len();
         exts.dedup();
-        assert_eq!(exts.len(), total, "hay extensiones duplicadas entre formatos");
+        assert_eq!(
+            exts.len(),
+            total,
+            "hay extensiones duplicadas entre formatos"
+        );
     }
 }

@@ -100,10 +100,16 @@ pub fn resolve_image(url: &str, doc_dir: Option<&Path>) -> ImageSource {
     };
 
     if is_absolute(&decoded) {
-        return ImageSource::Local { path: PathBuf::from(decoded), format };
+        return ImageSource::Local {
+            path: PathBuf::from(decoded),
+            format,
+        };
     }
     match doc_dir {
-        Some(dir) => ImageSource::Local { path: dir.join(decoded), format },
+        Some(dir) => ImageSource::Local {
+            path: dir.join(decoded),
+            format,
+        },
         None => ImageSource::NoBaseDir,
     }
 }
@@ -128,7 +134,10 @@ pub fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
     // El SVG es texto: no tiene firma fija, puede venir con BOM, declaracion XML o
     // comentarios antes de la raiz. Se busca la etiqueta en el arranque del archivo.
     let head = &bytes[..bytes.len().min(SVG_SNIFF_BYTES)];
-    if String::from_utf8_lossy(head).to_ascii_lowercase().contains("<svg") {
+    if String::from_utf8_lossy(head)
+        .to_ascii_lowercase()
+        .contains("<svg")
+    {
         return Some(ImageFormat::Svg);
     }
     None
@@ -296,7 +305,9 @@ fn has_scheme(url: &str) -> bool {
     let scheme = &url[..colon];
     !scheme.is_empty()
         && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-        && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// Deshace los `%XX` de la ruta. Markdown escapa asi los espacios (`mi%20foto.png`), y sin
@@ -390,14 +401,22 @@ mod tests {
             "http://example.com/a.png",
             "data:image/png;base64,AAAA",
         ] {
-            assert_eq!(resolve_image(url, Some(&dir())), ImageSource::Remote, "con {url}");
+            assert_eq!(
+                resolve_image(url, Some(&dir())),
+                ImageSource::Remote,
+                "con {url}"
+            );
         }
     }
 
     #[test]
     fn una_extension_que_no_es_de_imagen_no_se_previsualiza() {
         for url in ["informe.pdf", "notas.md", "sin-extension", ".gitignore"] {
-            assert_eq!(resolve_image(url, Some(&dir())), ImageSource::Unsupported, "con {url}");
+            assert_eq!(
+                resolve_image(url, Some(&dir())),
+                ImageSource::Unsupported,
+                "con {url}"
+            );
         }
     }
 
@@ -461,11 +480,23 @@ mod tests {
 
     #[test]
     fn el_contenido_se_reconoce_por_su_firma() {
-        assert_eq!(sniff_format(b"\x89PNG\r\n\x1a\nresto"), Some(ImageFormat::Png));
-        assert_eq!(sniff_format(b"\xFF\xD8\xFF\xE0resto"), Some(ImageFormat::Jpeg));
+        assert_eq!(
+            sniff_format(b"\x89PNG\r\n\x1a\nresto"),
+            Some(ImageFormat::Png)
+        );
+        assert_eq!(
+            sniff_format(b"\xFF\xD8\xFF\xE0resto"),
+            Some(ImageFormat::Jpeg)
+        );
         assert_eq!(sniff_format(b"GIF89a resto"), Some(ImageFormat::Gif));
-        assert_eq!(sniff_format(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some(ImageFormat::Webp));
-        assert_eq!(sniff_format(b"<svg xmlns=\"...\"></svg>"), Some(ImageFormat::Svg));
+        assert_eq!(
+            sniff_format(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+            Some(ImageFormat::Webp)
+        );
+        assert_eq!(
+            sniff_format(b"<svg xmlns=\"...\"></svg>"),
+            Some(ImageFormat::Svg)
+        );
     }
 
     #[test]
@@ -487,7 +518,11 @@ mod tests {
         assert_eq!(format, ImageFormat::Png, "la extension promete PNG");
 
         let bytes = b"RIFF\x00\x00\x00\x00WEBPVP8 resto";
-        assert_eq!(sniff_format(bytes), Some(ImageFormat::Webp), "pero el contenido manda");
+        assert_eq!(
+            sniff_format(bytes),
+            Some(ImageFormat::Webp),
+            "pero el contenido manda"
+        );
     }
 
     #[test]
@@ -520,7 +555,10 @@ mod tests {
     #[test]
     fn una_imagen_junto_al_documento_se_escribe_relativa() {
         // Lo relativo es lo que mantiene el .md portable: mover la carpeta no lo rompe.
-        assert_eq!(markdown_path(Path::new("/home/ana/notas/gato.png"), Some(&dir())), "gato.png");
+        assert_eq!(
+            markdown_path(Path::new("/home/ana/notas/gato.png"), Some(&dir())),
+            "gato.png"
+        );
     }
 
     #[test]
@@ -650,8 +688,14 @@ mod tests {
         // Es la forma REAL de la salida de pandoc: atributos separados por saltos de linea.
         let html = "<figure>\n<img\nsrc=\"C:/fotos/a.png\"\nalt=\"cap\" />\n</figure>";
         let out = rewrite_img_srcs(html, fake);
-        assert!(out.contains("src=\"data:image/png;base64,AAAA(C:/fotos/a.png)\""), "{out}");
-        assert!(out.contains("alt=\"cap\""), "el resto de la etiqueta se conserva: {out}");
+        assert!(
+            out.contains("src=\"data:image/png;base64,AAAA(C:/fotos/a.png)\""),
+            "{out}"
+        );
+        assert!(
+            out.contains("alt=\"cap\""),
+            "el resto de la etiqueta se conserva: {out}"
+        );
     }
 
     #[test]
@@ -667,7 +711,10 @@ mod tests {
         let out = rewrite_img_srcs(html, fake);
         assert!(out.contains("AAAA(a.png)"), "{out}");
         assert!(out.contains("AAAA(b.png)"), "{out}");
-        assert!(out.contains("<p>medio</p>"), "no se pierde lo que hay en el medio: {out}");
+        assert!(
+            out.contains("<p>medio</p>"),
+            "no se pierde lo que hay en el medio: {out}"
+        );
     }
 
     #[test]
@@ -680,7 +727,10 @@ mod tests {
     #[test]
     fn se_aceptan_las_comillas_simples() {
         let html = "<img src='a.png' />";
-        assert_eq!(rewrite_img_srcs(html, fake), "<img src='data:image/png;base64,AAAA(a.png)' />");
+        assert_eq!(
+            rewrite_img_srcs(html, fake),
+            "<img src='data:image/png;base64,AAAA(a.png)' />"
+        );
     }
 
     #[test]

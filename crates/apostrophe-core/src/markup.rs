@@ -365,10 +365,20 @@ pub struct Span {
 
 impl Span {
     fn new(from: usize, to: usize, kind: SpanKind) -> Self {
-        Span { from, to, kind, level: None }
+        Span {
+            from,
+            to,
+            kind,
+            level: None,
+        }
     }
     fn heading(from: usize, to: usize, level: u8) -> Self {
-        Span { from, to, kind: SpanKind::Heading, level: Some(level) }
+        Span {
+            from,
+            to,
+            kind: SpanKind::Heading,
+            level: Some(level),
+        }
     }
 }
 
@@ -396,7 +406,10 @@ pub fn parse_markup(text: &str) -> Vec<Span> {
     // recibe limites de char (los bytes interiores de un char multibyte valen 0 en el mapa
     // y nunca se consultan). El debug_assert lo blinda ante aritmetica de offsets futura.
     let c = |b: usize| {
-        debug_assert!(text.is_char_boundary(b), "offset {b} no esta en un limite de char");
+        debug_assert!(
+            text.is_char_boundary(b),
+            "offset {b} no esta en un limite de char"
+        );
         b2c[b]
     };
     let mut out: Vec<Span> = Vec::new();
@@ -412,7 +425,9 @@ pub fn parse_markup(text: &str) -> Vec<Span> {
     // Un match (salvo el propio code block) se descarta si su inicio O su fin cae
     // ESTRICTAMENTE dentro de un code block (paridad con `match_inside_code_blocks`).
     let inside = |s: usize, e: usize| {
-        blocks.iter().any(|&(bs, be)| (bs < s && s < be) || (bs < e && e < be))
+        blocks
+            .iter()
+            .any(|&(bs, be)| (bs < s && s < be) || (bs < e && e < be))
     };
 
     // 2) Match COMPLETO (incluye los delimitadores), igual que el upstream.
@@ -472,7 +487,9 @@ pub fn parse_markup(text: &str) -> Vec<Span> {
         if inside(m.start(), m.end()) {
             continue;
         }
-        let level = caps.name("level").map_or(1, |l| (l.as_str().len().min(6)) as u8);
+        let level = caps
+            .name("level")
+            .map_or(1, |l| (l.as_str().len().min(6)) as u8);
         out.push(Span::heading(c(m.start()), c(m.end()), level));
     }
     // Setext (`Titulo\n===`): === -> nivel 1, --- -> nivel 2. Se descartan los matches que
@@ -490,7 +507,11 @@ pub fn parse_markup(text: &str) -> Vec<Span> {
             }
         }
         let underline = text[m.start()..m.end()].split('\n').nth(1).unwrap_or("");
-        let level = if underline.trim_start().starts_with('=') { 1 } else { 2 };
+        let level = if underline.trim_start().starts_with('=') {
+            1
+        } else {
+            2
+        };
         out.push(Span::heading(c(m.start()), c(m.end()), level));
     }
 
@@ -595,7 +616,10 @@ mod highlight_tests {
 
     #[test]
     fn bold_full_match() {
-        assert_eq!(parse_markup("**foo**"), vec![Span::new(0, 7, SpanKind::Bold)]);
+        assert_eq!(
+            parse_markup("**foo**"),
+            vec![Span::new(0, 7, SpanKind::Bold)]
+        );
     }
 
     #[test]
@@ -605,8 +629,14 @@ mod highlight_tests {
 
     #[test]
     fn italic_asterisk_and_underscore() {
-        assert_eq!(parse_markup("*foo*"), vec![Span::new(0, 5, SpanKind::Italic)]);
-        assert_eq!(parse_markup("_foo_"), vec![Span::new(0, 5, SpanKind::Italic)]);
+        assert_eq!(
+            parse_markup("*foo*"),
+            vec![Span::new(0, 5, SpanKind::Italic)]
+        );
+        assert_eq!(
+            parse_markup("_foo_"),
+            vec![Span::new(0, 5, SpanKind::Italic)]
+        );
     }
 
     #[test]
@@ -615,14 +645,19 @@ mod highlight_tests {
         // (replica el apilado de tags de Pango). El frontend usa Decoration.set, que admite
         // solapes, NO RangeSetBuilder. Este test blinda esa decision.
         let s = parse_markup("***foo***");
-        assert!(s.iter().any(|x| x.kind == SpanKind::BoldItalic && x.from == 0 && x.to == 9));
+        assert!(s
+            .iter()
+            .any(|x| x.kind == SpanKind::BoldItalic && x.from == 0 && x.to == 9));
         assert!(s.iter().any(|x| x.kind == SpanKind::Bold));
         assert!(s.len() >= 2, "esperaba spans solapados, hubo {}", s.len());
     }
 
     #[test]
     fn strikethrough() {
-        assert_eq!(parse_markup("~~x~~"), vec![Span::new(0, 5, SpanKind::Strikethrough)]);
+        assert_eq!(
+            parse_markup("~~x~~"),
+            vec![Span::new(0, 5, SpanKind::Strikethrough)]
+        );
     }
 
     #[test]
@@ -659,7 +694,8 @@ mod highlight_tests {
         assert!(has(&s, 0, 1, SpanKind::Marker));
         assert!(has(&s, 4, 15, SpanKind::Marker));
         assert!(
-            !s.iter().any(|x| x.kind == SpanKind::Marker && x.from <= 1 && x.to >= 4),
+            !s.iter()
+                .any(|x| x.kind == SpanKind::Marker && x.from <= 1 && x.to >= 4),
             "el texto del link no debe llevar marcador"
         );
     }
@@ -675,7 +711,12 @@ mod highlight_tests {
     #[test]
     fn link_alt_marks_url() {
         // "<https://x.com>": la URL (sin <>) como marcador. URL en char 1..14.
-        assert!(has(&parse_markup("<https://x.com>"), 1, 14, SpanKind::Marker));
+        assert!(has(
+            &parse_markup("<https://x.com>"),
+            1,
+            14,
+            SpanKind::Marker
+        ));
     }
 
     #[test]
@@ -685,7 +726,9 @@ mod highlight_tests {
 
     #[test]
     fn horizontal_rule() {
-        assert!(parse_markup("\n\n---\n\n").iter().any(|x| x.kind == SpanKind::Hr));
+        assert!(parse_markup("\n\n---\n\n")
+            .iter()
+            .any(|x| x.kind == SpanKind::Hr));
     }
 
     #[test]
@@ -698,8 +741,14 @@ mod highlight_tests {
     #[test]
     fn heading_underline_setext_levels() {
         // === -> nivel 1; --- -> nivel 2 (rango exacto del match completo).
-        assert_eq!(parse_markup("Titulo\n======\n"), vec![Span::heading(0, 14, 1)]);
-        assert_eq!(parse_markup("Titulo\n------\n"), vec![Span::heading(0, 14, 2)]);
+        assert_eq!(
+            parse_markup("Titulo\n======\n"),
+            vec![Span::heading(0, 14, 1)]
+        );
+        assert_eq!(
+            parse_markup("Titulo\n------\n"),
+            vec![Span::heading(0, 14, 2)]
+        );
     }
 
     #[test]
@@ -711,21 +760,29 @@ mod highlight_tests {
             !s.iter().any(|x| x.kind == SpanKind::Heading && x.from < 26),
             "el frontmatter no debe producir encabezados"
         );
-        assert!(s.iter().any(|x| x.kind == SpanKind::Heading && x.from >= 26));
+        assert!(s
+            .iter()
+            .any(|x| x.kind == SpanKind::Heading && x.from >= 26));
     }
 
     #[test]
     fn char_offsets_not_byte_with_accents() {
         // "camión **fin**": 'ó' son 2 bytes; el Bold empieza en CHAR 7 (no byte 8).
         let s = parse_markup("camión **fin**");
-        let b = s.iter().find(|x| x.kind == SpanKind::Bold).expect("falta el span Bold");
+        let b = s
+            .iter()
+            .find(|x| x.kind == SpanKind::Bold)
+            .expect("falta el span Bold");
         assert_eq!((b.from, b.to), (7, 14), "offsets en CHAR index, no byte");
     }
 
     #[test]
     fn multibyte_content_offsets() {
         // "**camión**": 10 chars (** + camión[6] + **); 'ó' cuenta 1 char aunque sean 2 bytes.
-        assert_eq!(parse_markup("**camión**"), vec![Span::new(0, 10, SpanKind::Bold)]);
+        assert_eq!(
+            parse_markup("**camión**"),
+            vec![Span::new(0, 10, SpanKind::Bold)]
+        );
     }
 
     #[test]
