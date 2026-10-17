@@ -370,7 +370,7 @@ async fn pick_image(
 // --- M4: gestion de documento (abrir / guardar) ---
 // El estado vive en el `Workspace` del dominio como managed state (Mutex): varios
 // `DocumentStore` (uno por pestaña) identificados por un `DocId` estable. El I/O de disco
-// se hace aca con std::fs; los pickers nativos con tauri-plugin-dialog.
+// se hace aquí con std::fs; los pickers nativos con tauri-plugin-dialog.
 //
 // Compatibilidad: todo comando de documento acepta un `doc_id` OPCIONAL (`docId` en el
 // IPC). Si no llega, opera sobre el documento ACTIVO, que es exactamente el documento
@@ -393,6 +393,25 @@ type Docs = Mutex<Workspace>;
 /// Error estable cuando el `doc_id` pedido ya no existe (la pestaña se cerro). Es un
 /// CODIGO, no una frase: la copia visible vive en el catalogo de i18n del frontend.
 const UNKNOWN_DOCUMENT: &str = "unknown-document";
+
+/// Error estable de "guardar como" sobre una ruta que ya tiene abierta OTRO documento.
+/// Se rechaza: dos documentos con la misma ruta se pisarian al guardar y el watcher de
+/// uno recargaria en silencio el contenido del otro. El frontend avisa que esta abierto
+/// en otra pestaña.
+const PATH_OPEN_IN_OTHER_DOCUMENT: &str = "path-open-in-other-document";
+
+/// Comprueba, justo antes de escribir, que se puede guardar el documento `id` en `path`:
+/// que el documento sigue abierto (pudo cerrarse mientras el dialogo estaba abierto) y
+/// que ningun OTRO documento tiene esa ruta. Si falla, no se escribe nada.
+fn check_save_target(ws: &Workspace, id: DocId, path: &Path) -> Result<(), String> {
+    if !ws.contains(id) {
+        return Err(UNKNOWN_DOCUMENT.to_string());
+    }
+    if ws.other_with_path(Some(id), path).is_some() {
+        return Err(PATH_OPEN_IN_OTHER_DOCUMENT.to_string());
+    }
+    Ok(())
+}
 
 /// Workspace inicial: un documento nuevo vacio, el mismo punto de partida que tenia el
 /// editor de un solo documento.
@@ -432,10 +451,11 @@ type DocWatcher = Debouncer<notify_debouncer_full::notify::RecommendedWatcher, R
 /// Watchers de los documentos abiertos, por `DocId`. Un documento sin ruta no tiene.
 struct FileWatchers(Mutex<HashMap<DocId, DocWatcher>>);
 
-/// Payload de `file-changed-on-disk`: a que documento le cambio el archivo. El frontend
-/// de un solo documento ignora el payload, asi que agregarlo es compatible.
+/// Payload de `file-changed-on-disk`: a que documento le cambio el archivo
+/// (`{ doc_id }`, en snake_case como `OpenedDoc` y `DocStatus`; solo los ARGUMENTOS de
+/// los comandos van en camelCase). El frontend de un solo documento ignora el payload,
+/// asi que agregarlo es compatible.
 #[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct DiskChange {
     doc_id: DocId,
 }
@@ -515,8 +535,15 @@ fn rewatch_doc(app: &tauri::AppHandle, docs: &Docs, id: DocId) {
                 return;
             }
             // Si el documento se cerro mientras se armaba, el watcher sobra: se suelta
-            // aca y no queda emitiendo eventos de un documento que ya no existe.
-            if !docs.lock().unwrap().contains(id) {
+            // aquí y no queda emitiendo eventos de un documento que ya no existe. El lock
+            // del workspace se mantiene durante la insercion para que sea atomica frente a
+            // close_document (que cierra bajo ese lock y luego suelta el watcher).
+            //
+            // Orden de locks: workspace -> watchers. Nadie toma el del workspace teniendo
+            // el de watchers (suppress_watcher solo toma el de watchers), asi que no hay
+            // deadlock.
+            let ws = docs.lock().unwrap();
+            if !ws.contains(id) {
                 return;
             }
             app.state::<FileWatchers>()
@@ -524,6 +551,7 @@ fn rewatch_doc(app: &tauri::AppHandle, docs: &Docs, id: DocId) {
                 .lock()
                 .unwrap()
                 .insert(id, debouncer);
+            drop(ws);
         }
         Err(e) => {
             eprintln!("watcher: no se pudo crear el debouncer: {e}");
@@ -680,7 +708,7 @@ fn load_path(
     let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
     // M16: este es el UNICO punto por el que pasa "archivo -> estado del documento"
     // (dialogo, asociacion .md, arranque en frio y recarga), asi que registrar el reciente
-    // aca cubre todas las vias de apertura sin repetir la llamada en cada camino.
+    // aquí cubre todas las vias de apertura sin repetir la llamada en cada camino.
     remember_recent(app, &path);
     let mut ws = docs.lock().unwrap();
     // Si el destino se cerro mientras se leia el disco, se abre como documento nuevo.
@@ -994,6 +1022,7 @@ async fn save_document(
     let Some(path) = existing else {
         return save_document_as(app, text, Some(target), docs, session).await;
     };
+    check_save_target(&docs.lock().unwrap(), target, &path)?;
     // M8.4b: suspender el watcher antes de escribir para no auto-disparar el evento.
     suppress_watcher(&app, target);
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
@@ -1046,9 +1075,14 @@ async fn save_document_as(
     let Some(file_path) = picked else {
         return Ok(None);
     };
-    let path = file_path
-        .into_path()
-        .map_err(|e| format!("ruta invalida: {e}"))?;
+    let path = absolute_doc_path(
+        file_path
+            .into_path()
+            .map_err(|e| format!("ruta invalida: {e}"))?,
+    );
+    // Antes de escribir y de tocar recientes: si el documento se cerro durante el dialogo
+    // o la ruta la tiene otra pestaña, no se escribe nada.
+    check_save_target(&docs.lock().unwrap(), target, &path)?;
     // M8.4b: suspender el watcher antes de escribir (la ruta aun puede ser la antigua).
     suppress_watcher(&app, target);
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
@@ -1424,7 +1458,7 @@ fn delete_snapshot_files(dir: &Path, id: &str) {
 
 /// Busca los snapshots huerfanos del dir (de una sesion anterior), del mas reciente al
 /// mas antiguo, con el contenido y, si lo habia, el archivo original. Tolerante a
-/// archivos corruptos: los saltea sin propagarlos.
+/// archivos corruptos: los omite sin propagarlos.
 fn find_orphans(dir: &Path) -> Vec<RestoredSnapshot> {
     use apostrophe_core::snapshot::{
         meta_file_name, parse_snapshot_id, snapshot_file_name, sort_newest_first, SnapshotMeta,
@@ -1530,9 +1564,10 @@ async fn write_snapshot(
         })
         .await
         .map_err(|e| format!("error de autosave: {e}"))??;
-        // Si el documento se cerro mientras se escribia, su snapshot quedaria huerfano y
-        // se ofreceria restaurarlo en el proximo arranque: se borra.
-        if !docs.lock().unwrap().contains(id) {
+        // Si el documento se cerro (o la ventana empezo a cerrarse) mientras se escribia,
+        // su snapshot quedaria huerfano y se ofreceria restaurarlo en el proximo
+        // arranque: se borra.
+        if session.closing.load(Ordering::SeqCst) || !docs.lock().unwrap().contains(id) {
             let _ =
                 tauri::async_runtime::spawn_blocking(move || delete_snapshot_files(&dir, &snap_id))
                     .await;
@@ -1780,7 +1815,53 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_doc_path, file_args, find_orphans, resolve_launch_path};
+    use super::{
+        absolute_doc_path, check_save_target, file_args, find_orphans, resolve_launch_path,
+    };
+    use apostrophe_core::workspace::Workspace;
+
+    #[test]
+    fn guardar_como_sobre_la_ruta_de_otro_documento_se_rechaza() {
+        let mut ws = Workspace::new();
+        let a = ws.open_path("/docs/a.md".into(), "A".into()).id;
+        let b = ws.create_untitled();
+        assert_eq!(
+            check_save_target(&ws, b, std::path::Path::new("/Docs/A.md")),
+            Err("path-open-in-other-document".to_string())
+        );
+        let _ = a;
+    }
+
+    #[test]
+    fn guardar_sobre_su_propia_ruta_o_una_libre_se_permite() {
+        let mut ws = Workspace::new();
+        let a = ws.open_path("/docs/a.md".into(), "A".into()).id;
+        assert_eq!(
+            check_save_target(&ws, a, std::path::Path::new("/docs/a.md")),
+            Ok(())
+        );
+        assert_eq!(
+            check_save_target(&ws, a, std::path::Path::new("/docs/b.md")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn guardar_un_documento_ya_cerrado_se_rechaza() {
+        let mut ws = Workspace::new();
+        let a = ws.create_untitled();
+        ws.close(a);
+        assert_eq!(
+            check_save_target(&ws, a, std::path::Path::new("/docs/a.md")),
+            Err("unknown-document".to_string())
+        );
+    }
+
+    #[test]
+    fn el_payload_de_cambio_en_disco_usa_doc_id_en_snake_case() {
+        let json = serde_json::to_value(super::DiskChange { doc_id: 7 }).unwrap();
+        assert_eq!(json, serde_json::json!({ "doc_id": 7 }));
+    }
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|a| a.to_string()).collect()
@@ -1861,7 +1942,7 @@ mod tests {
     }
 
     #[test]
-    fn find_orphans_saltea_los_que_no_tienen_metadata_valida() {
+    fn find_orphans_omite_los_que_no_tienen_metadata_valida() {
         let dir = scratch_dir("orphans-corrupt");
         plant_snapshot(&dir, "ok", "bien", 10);
         std::fs::write(dir.join("roto.snapshot"), "sin meta").unwrap();
