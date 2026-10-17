@@ -52,8 +52,14 @@ scripts. It uses the same pandoc, typst and dictionary as the app, never asks fo
 confirmation, and its output is stable. The contract is the **exit codes and error codes**;
 messages are in English and are only diagnostics.
 
-> After installing, open a **new** terminal. Terminals that were already open (and the
-> agents running in them) keep the old PATH and will not find `elision`.
+> After installing, **fully close** Windows Terminal, VS Code or whatever program you open
+> your terminal from, and start it again. A new tab is not enough: it inherits the PATH that
+> program had when it started, so neither the tab nor the agents running in it will find
+> `elision`. If you would rather not close it, reload the PATH in the current tab:
+>
+> ```powershell
+> $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+> ```
 
 ```powershell
 elision --help
