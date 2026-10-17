@@ -1,8 +1,7 @@
 //! `open`: abre archivos en la GUI y termina enseguida, sin esperar a que se cierre.
 //!
-//! La GUI no cambia: recibe las rutas en argv y abre la primera (`file_arg`), en frio o a
-//! traves de single-instance si ya esta abierta. Hasta que haya pestanas, el resto se
-//! pasa igual pero no se muestra; la CLI lo avisa.
+//! La GUI recibe las rutas en argv y abre cada una en su pestaña, en frío o a través de
+//! single-instance si ya está abierta.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -62,15 +61,6 @@ pub fn execute(args: &OpenArgs, env: &Env) -> Result<OpenReport, CliError> {
 impl Report for OpenReport {
     fn text(&self) -> String {
         String::new()
-    }
-
-    fn warnings(&self) -> Vec<String> {
-        match self.files.as_slice() {
-            [first, _, ..] => vec![format!(
-                "the editor shows only the first file for now: {first}"
-            )],
-            _ => Vec::new(),
-        }
     }
 }
 

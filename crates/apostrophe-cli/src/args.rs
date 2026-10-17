@@ -95,7 +95,7 @@ pub struct SpellArgs {
 
 #[derive(Debug, Args)]
 pub struct OpenArgs {
-    /// Files to open (for now the editor shows the first one)
+    /// Files to open, each in its own tab
     #[arg(required = true, value_name = "FILE")]
     pub files: Vec<PathBuf>,
 }

@@ -908,12 +908,8 @@ fn open_pasa_todas_las_rutas_absolutas_a_la_gui_y_no_la_espera() {
     assert_eq!(out.code, 0, "{}", out.stderr);
     assert_eq!(out.stdout, "");
     assert_eq!(*fx.launches.borrow(), [(exe, vec![a, b])]);
-    // Hasta que haya pestanas la GUI muestra solo el primero: se avisa.
-    assert!(
-        out.stderr.starts_with("elision: warning: "),
-        "{}",
-        out.stderr
-    );
+    // Con pestañas la GUI abre todos los archivos: no hay nada que avisar.
+    assert_eq!(out.stderr, "");
 }
 
 #[test]
