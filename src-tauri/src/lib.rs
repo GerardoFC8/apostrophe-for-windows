@@ -1573,29 +1573,54 @@ fn purge_snapshots_dir(dir: &Path) {
 // --- Capa B: asociacion de archivos (.md) ---
 // En Windows el doble-click en un .md ejecuta `apostrophe.exe <ruta>`: el path llega
 // como ARGUMENTO de CLI. `RunEvent::Opened` NO se dispara en Windows (solo macOS/iOS/
-// Android), por eso se lee de argv. Dos caminos:
-//  - app cerrada: setup() resuelve argv -> PendingFile; el frontend lo consume al cargar.
-//  - app abierta: single-instance reenvia el argv -> evento "open-file-path" al frontend.
+// Android), por eso se lee de argv. Puede llegar MAS de una ruta (`apostrophe.exe a.md
+// b.md` desde una terminal). Dos caminos:
+//  - app cerrada: setup() resuelve argv -> PendingFiles; el frontend los consume al cargar.
+//  - app abierta: single-instance reenvia el argv -> un evento "open-file-path" por ruta.
 
-/// Extrae la ruta del archivo a abrir desde argv. Ignora argv[0] (el exe) y los flags
-/// (empiezan con '-'); devuelve la primera ruta "normal", o None. No valida existencia:
-/// el lector reporta un error legible si la ruta no se puede leer.
-fn file_arg(args: &[String]) -> Option<String> {
+/// Extrae TODAS las rutas de archivo de argv, en orden. Ignora argv[0] (el exe) y los
+/// flags (empiezan con '-'). No valida existencia: el lector reporta un error legible si
+/// una ruta no se puede leer.
+fn file_args(args: &[String]) -> Vec<String> {
     args.iter()
         .skip(1)
-        .find(|a| !a.is_empty() && !a.starts_with('-'))
+        .filter(|a| !a.is_empty() && !a.starts_with('-'))
         .cloned()
+        .collect()
 }
 
-/// Archivo pendiente del ARRANQUE EN FRIO (asociacion .md con la app cerrada): se
-/// resuelve en setup() desde argv y el frontend lo consume (y limpia) al iniciar.
-struct PendingFile(Mutex<Option<OpenedDoc>>);
+/// Resuelve una ruta recibida por single-instance contra el directorio actual de la
+/// instancia que la RECIBIO del sistema (la segunda), no contra el de esta: `apostrophe.exe
+/// nota.md` lanzado desde otra carpeta trae una ruta relativa a esa carpeta. Si el plugin
+/// no informa el directorio, se deja tal cual.
+fn resolve_launch_path(cwd: &str, arg: &str) -> PathBuf {
+    let path = PathBuf::from(arg);
+    if path.is_absolute() || cwd.is_empty() {
+        path
+    } else {
+        Path::new(cwd).join(path)
+    }
+}
 
-/// Devuelve (y limpia) el archivo pendiente del arranque en frio, si lo hay. El frontend
-/// lo llama al iniciar para cargar el .md con el que se abrio la app.
+/// Archivos pendientes del ARRANQUE EN FRIO (asociacion .md con la app cerrada), en el
+/// orden de argv: se resuelven en setup() y el frontend los consume (y limpia) al iniciar.
+struct PendingFiles(Mutex<Vec<OpenedDoc>>);
+
+/// Devuelve el PRIMER archivo pendiente del arranque en frio, si lo hay, y descarta la
+/// lista. Es lo que espera el frontend de un solo documento, que carga el .md con el que
+/// se abrio la app (los demas siguen abiertos en el workspace).
 #[tauri::command]
-fn take_pending_file(pending: tauri::State<'_, PendingFile>) -> Option<OpenedDoc> {
-    pending.0.lock().unwrap().take()
+fn take_pending_file(pending: tauri::State<'_, PendingFiles>) -> Option<OpenedDoc> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
+        .into_iter()
+        .next()
+}
+
+/// Devuelve (y limpia) TODOS los archivos pendientes del arranque en frio, en orden: uno
+/// por pestaña. El primero es el documento activo.
+#[tauri::command]
+fn take_pending_files(pending: tauri::State<'_, PendingFiles>) -> Vec<OpenedDoc> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1603,16 +1628,18 @@ pub fn run() {
     tauri::Builder::default()
         // single-instance PRIMERO (requisito del plugin): si ya hay una instancia, la
         // nueva (lanzada por Windows al abrir un .md) reenvia su argv y se cierra.
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             // Traer el foco a la ventana existente.
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_focus();
             }
-            // Apertura via asociacion con la app YA abierta: emitir el path al frontend,
+            // Apertura via asociacion con la app YA abierta: emitir CADA path al frontend,
             // que hace el open guardado (open_path). NO leemos el archivo aca: este
             // callback corre en el event-loop y leer/dialogar podria bloquear (deadlock M4).
-            if let Some(path) = file_arg(&args) {
-                let _ = app.emit("open-file-path", path);
+            // Las rutas relativas se resuelven contra el directorio de la segunda instancia.
+            for path in file_args(&args) {
+                let full = resolve_launch_path(&cwd, &path);
+                let _ = app.emit("open-file-path", full.to_string_lossy().into_owned());
             }
         }))
         // M8.2: recuerda la geometria de la ventana entre sesiones (restaura al crear la
@@ -1637,7 +1664,7 @@ pub fn run() {
         // Pestañas: el workspace arranca con un documento nuevo vacio, como antes.
         .manage(Mutex::new(initial_workspace()))
         .manage(SpellState(RwLock::new(None)))
-        .manage(PendingFile(Mutex::new(None)))
+        .manage(PendingFiles(Mutex::new(Vec::new())))
         // M8.4b: watchers de cambios externos, uno por documento con ruta.
         .manage(FileWatchers(Mutex::new(HashMap::new())))
         // M8.4a: session id generado en run() para que este disponible en setup() sin mover.
@@ -1660,23 +1687,36 @@ pub fn run() {
                 purge_snapshots_dir(&dir);
             }
 
-            // Capa B: arranque en frio via asociacion .md (app cerrada). Windows pasa el
-            // path en argv; lo resolvemos a un OpenedDoc y lo dejamos pendiente para que
-            // el frontend lo cargue al iniciar. Si falla (ruta invalida), se ignora y la
-            // app abre vacia. El pending file tiene PRECEDENCIA sobre el restore.
+            // Capa B: arranque en frio via asociacion .md (app cerrada). Windows pasa las
+            // rutas en argv; las cargamos en el workspace y las dejamos pendientes para que
+            // el frontend las muestre al iniciar. La primera ocupa el documento vacio
+            // inicial y las demas se abren aparte; la primera queda activa. Una ruta que
+            // falla (invalida) se ignora. Los pending files tienen PRECEDENCIA sobre el
+            // restore.
             let argv: Vec<String> = std::env::args().collect();
-            if let Some(path) = file_arg(&argv) {
-                let docs = app.state::<Docs>();
-                let into = docs.lock().unwrap().active();
+            let docs = app.state::<Docs>();
+            let initial = docs.lock().unwrap().active();
+            let mut pending: Vec<OpenedDoc> = Vec::new();
+            for path in file_args(&argv) {
+                let into = if pending.is_empty() { initial } else { None };
                 match load_path(app.handle(), PathBuf::from(&path), &docs, into) {
-                    Ok((opened, _)) => {
+                    Ok((opened, fresh)) => {
                         // M8.4b: armar el watcher sobre el archivo del arranque en frio.
-                        rewatch_doc(app.handle(), &docs, opened.doc_id);
-                        *app.state::<PendingFile>().0.lock().unwrap() = Some(opened);
+                        if fresh {
+                            rewatch_doc(app.handle(), &docs, opened.doc_id);
+                        }
+                        // La misma ruta dos veces en argv es un solo documento.
+                        if !pending.iter().any(|o| o.doc_id == opened.doc_id) {
+                            pending.push(opened);
+                        }
                     }
                     Err(e) => eprintln!("no se pudo abrir el archivo de inicio '{path}': {e}"),
                 }
             }
+            if let Some(first) = pending.first() {
+                docs.lock().unwrap().activate(first.doc_id);
+            }
+            *app.state::<PendingFiles>().0.lock().unwrap() = pending;
 
             // M8.4a: timer de autosave. Emite "autosave-tick" cada 5 s para que el frontend
             // invoque write_snapshot. Usa tauri::async_runtime::spawn (runtime de Tauri/tokio)
@@ -1714,6 +1754,7 @@ pub fn run() {
             spellcheck,
             parse_markup,
             take_pending_file,
+            take_pending_files,
             write_snapshot,
             take_pending_restore,
             take_pending_restores,
@@ -1729,7 +1770,45 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_doc_path, file_arg, find_orphans};
+    use super::{absolute_doc_path, file_args, find_orphans, resolve_launch_path};
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn file_args_devuelve_todas_las_rutas_en_orden() {
+        let argv = args(&["apostrophe.exe", "a.md", "--flag", "", "C:\\docs\\b.md"]);
+        assert_eq!(file_args(&argv), args(&["a.md", "C:\\docs\\b.md"]));
+    }
+
+    #[test]
+    fn file_args_vacio_cuando_solo_esta_el_exe() {
+        assert!(file_args(&args(&["apostrophe.exe"])).is_empty());
+    }
+
+    #[test]
+    fn resolve_launch_path_resuelve_la_relativa_contra_el_cwd_de_la_segunda_instancia() {
+        let cwd = std::env::temp_dir().join("otra-carpeta");
+        let full = resolve_launch_path(&cwd.to_string_lossy(), "nota.md");
+        assert_eq!(full, cwd.join("nota.md"));
+    }
+
+    #[test]
+    fn resolve_launch_path_no_toca_la_absoluta() {
+        let absolute = std::env::temp_dir().join("docs").join("nota.md");
+        let cwd = std::env::temp_dir().join("otra-carpeta");
+        let full = resolve_launch_path(&cwd.to_string_lossy(), &absolute.to_string_lossy());
+        assert_eq!(full, absolute);
+    }
+
+    #[test]
+    fn resolve_launch_path_sin_cwd_deja_la_ruta_igual() {
+        assert_eq!(
+            resolve_launch_path("", "nota.md"),
+            std::path::PathBuf::from("nota.md")
+        );
+    }
 
     /// Deja en `dir` un snapshot con su metadata, como lo dejaria una sesion que crasheo.
     fn plant_snapshot(dir: &std::path::Path, id: &str, content: &str, saved_at: u64) {
@@ -1804,27 +1883,21 @@ mod tests {
     }
 
     #[test]
-    fn file_arg_devuelve_la_ruta_tras_el_exe() {
+    fn file_args_devuelve_la_ruta_tras_el_exe() {
         let args = vec![
             "apostrophe.exe".to_string(),
             "C:\\docs\\nota.md".to_string(),
         ];
-        assert_eq!(file_arg(&args).as_deref(), Some("C:\\docs\\nota.md"));
+        assert_eq!(file_args(&args), vec!["C:\\docs\\nota.md".to_string()]);
     }
 
     #[test]
-    fn file_arg_ignora_flags() {
+    fn file_args_ignora_flags() {
         let args = vec![
             "apostrophe.exe".to_string(),
             "--algun-flag".to_string(),
             "nota.md".to_string(),
         ];
-        assert_eq!(file_arg(&args).as_deref(), Some("nota.md"));
-    }
-
-    #[test]
-    fn file_arg_none_cuando_solo_esta_el_exe() {
-        let args = vec!["apostrophe.exe".to_string()];
-        assert_eq!(file_arg(&args), None);
+        assert_eq!(file_args(&args), vec!["nota.md".to_string()]);
     }
 }
