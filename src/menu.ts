@@ -26,7 +26,9 @@ const tableSize = document.querySelector<HTMLElement>("#table-size")!;
 
 // Grilla de selección: al pasar el mouse se resaltan las celdas de arriba-izquierda hasta
 // la actual y la etiqueta muestra el tamaño. Mismo gesto que el selector del upstream.
-export function buildTablePicker(): void {
+// Se arma UNA sola vez en initMenu: no depende del idioma (las etiquetas son "fila × columna")
+// y reconstruirla apilaría otro listener de mouseleave sobre #table-grid en cada llamada.
+function buildTablePicker(): void {
   const cells: string[] = [];
   for (let row = 1; row <= TABLE_PICKER_SIZE; row++) {
     for (let col = 1; col <= TABLE_PICKER_SIZE; col++) {
@@ -242,6 +244,7 @@ export function initMenu(): void {
     closeAppMenu(); // el selector es una ventana nativa: el menú abierto detrás estorba
     void insertImage();
   });
+  buildTablePicker(); // M17: la grilla de #table-grid llega vacía en index.html
 
   // Cierre de los overlays: botón × y clic en el BACKDROP (no en el panel). El backdrop y el
   // panel son HERMANOS dentro de .overlay (no el panel hijo del backdrop), así que un clic en

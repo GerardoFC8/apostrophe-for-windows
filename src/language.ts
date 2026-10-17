@@ -5,7 +5,7 @@
 import { setSetting, getSetting } from "./settings";
 import { LOCALES, LOCALE_LABEL, getLocale, setLocale, t, type Locale } from "./i18n";
 import { applyTheme, buildThemeMenu, CHECK_ICON, type Theme } from "./theme";
-import { buildTablePicker, closeAppMenu } from "./menu";
+import { closeAppMenu } from "./menu";
 import { refreshTitlebar } from "./document-session";
 import { updateStats } from "./stats";
 
@@ -49,7 +49,6 @@ async function applyLocale(locale: Locale, persist: boolean): Promise<void> {
   setLocale(locale);
   applyTranslations();
   buildThemeMenu();
-  buildTablePicker();
   buildLanguageMenu();
   // El tema activo ya vive en el dataset de <html>: reaplicarlo actualiza la etiqueta del
   // trigger y el check del item, que acaban de reconstruirse con el catalogo nuevo.
