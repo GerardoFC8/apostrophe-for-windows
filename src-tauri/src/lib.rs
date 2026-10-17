@@ -10,6 +10,7 @@
 // El export, la ruta de los sidecars, el incrustado de imagenes y la carga del
 // diccionario viven en `apostrophe-sidecars`, sin Tauri, para compartirlos con la CLI.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -21,9 +22,9 @@ use notify_debouncer_full::{
     Debouncer, RecommendedCache,
 };
 
-use apostrophe_core::document::DocumentStore;
 use apostrophe_core::recents::Recents;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
+use apostrophe_core::workspace::{DocId, Workspace};
 use apostrophe_sidecars::dictionary::{load_es, DictionaryError};
 use apostrophe_sidecars::images::{embed_html_images_in, image_data_uri};
 use apostrophe_sidecars::sidecar_path;
@@ -53,16 +54,12 @@ static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
 #[tauri::command]
 async fn preview_markdown(
     app: tauri::AppHandle,
-    doc: tauri::State<'_, Doc>,
+    docs: tauri::State<'_, Docs>,
     text: String,
+    doc_id: Option<DocId>,
 ) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = {
-        doc.lock()
-            .unwrap()
-            .path()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-    };
+    let doc_dir = target_doc_dir(&docs, doc_id);
     let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!(
         "apostrophe-preview-{}-{}.md",
@@ -314,14 +311,13 @@ async fn render_math(
 /// El error es un CODIGO estable (`remote`, `not-found`, …), no una frase: la copia visible
 /// vive en el catalogo de i18n del frontend, que es quien sabe en que idioma esta la app.
 #[tauri::command]
-async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String, String> {
+async fn render_image(
+    docs: tauri::State<'_, Docs>,
+    url: String,
+    doc_id: Option<DocId>,
+) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = {
-        doc.lock()
-            .unwrap()
-            .path()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-    };
+    let doc_dir = target_doc_dir(&docs, doc_id);
     tauri::async_runtime::spawn_blocking(move || image_data_uri(&url, doc_dir.as_deref()))
         .await
         .map_err(|_| "unreadable".to_string())?
@@ -342,16 +338,12 @@ async fn render_image(doc: tauri::State<'_, Doc>, url: String) -> Result<String,
 #[tauri::command]
 async fn pick_image(
     app: tauri::AppHandle,
-    doc: tauri::State<'_, Doc>,
+    docs: tauri::State<'_, Docs>,
     filter_label: String,
+    doc_id: Option<DocId>,
 ) -> Result<Option<String>, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
-    let doc_dir = {
-        doc.lock()
-            .unwrap()
-            .path()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-    };
+    let doc_dir = target_doc_dir(&docs, doc_id);
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -376,35 +368,83 @@ async fn pick_image(
 }
 
 // --- M4: gestion de documento (abrir / guardar) ---
-// El estado (path/content/dirty) vive en el DocumentStore del dominio como managed
-// state (Mutex). El I/O de disco se hace aca con std::fs; los pickers nativos con
-// tauri-plugin-dialog.
+// El estado vive en el `Workspace` del dominio como managed state (Mutex): varios
+// `DocumentStore` (uno por pestaña) identificados por un `DocId` estable. El I/O de disco
+// se hace aca con std::fs; los pickers nativos con tauri-plugin-dialog.
+//
+// Compatibilidad: todo comando de documento acepta un `doc_id` OPCIONAL (`docId` en el
+// IPC). Si no llega, opera sobre el documento ACTIVO, que es exactamente el documento
+// unico de antes. Asi el frontend de un solo documento sigue funcionando sin cambios.
+//
+// El `DocId` se resuelve UNA vez al empezar el comando, antes de cualquier `.await`: si el
+// usuario cambia de pestaña mientras hay un dialogo abierto, el comando sigue apuntando
+// al documento con el que empezo.
 //
 // CRITICO (review M4): los comandos que abren dialogos son `async` y corren el
 // dialogo en `spawn_blocking`. Si fueran sincronos correrian INLINE en el main
 // thread de WebView2, y `blocking_pick_file`/`blocking_save_file` bloquean ese
 // thread mientras el dialogo se encola en el MISMO thread -> DEADLOCK (la app se
 // congela). En async + spawn_blocking el bloqueo ocurre en un hilo de pool y el
-// main thread queda libre para procesar el dialogo.
+// main thread queda libre para procesar el dialogo. Y el lock del workspace NUNCA
+// cruza un `.await`: se toma en bloques breves.
 
-type Doc = Mutex<DocumentStore>;
+type Docs = Mutex<Workspace>;
+
+/// Error estable cuando el `doc_id` pedido ya no existe (la pestaña se cerro). Es un
+/// CODIGO, no una frase: la copia visible vive en el catalogo de i18n del frontend.
+const UNKNOWN_DOCUMENT: &str = "unknown-document";
+
+/// Workspace inicial: un documento nuevo vacio, el mismo punto de partida que tenia el
+/// editor de un solo documento.
+fn initial_workspace() -> Workspace {
+    let mut ws = Workspace::new();
+    ws.create_untitled();
+    ws
+}
+
+/// Resuelve el documento destino de un comando: el `doc_id` pedido (error si ya no
+/// existe) o el activo (creando uno si no queda ninguno).
+fn target_doc(docs: &Docs, doc_id: Option<DocId>) -> Result<DocId, String> {
+    docs.lock()
+        .unwrap()
+        .resolve_or_create(doc_id)
+        .ok_or_else(|| UNKNOWN_DOCUMENT.to_string())
+}
+
+/// Carpeta del documento destino, contra la que se resuelven las rutas relativas de las
+/// imagenes. `None` si es un documento sin guardar (o si ya no existe).
+fn target_doc_dir(docs: &Docs, doc_id: Option<DocId>) -> Option<PathBuf> {
+    let ws = docs.lock().unwrap();
+    let id = ws.resolve(doc_id)?;
+    ws.get(id)?
+        .path()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+}
 
 // --- M8.4b: watcher de cambios externos ---
-// El Debouncer vive en managed state y se re-arma al abrir/guardar un archivo.
-// Se suspende (drop) alrededor de nuestros propios guardados para evitar el
-// auto-disparo. El handler solo traduce + emite: NUNCA toma locks del Doc ni
-// abre dialogos (gotcha anti-deadlock M4).
+// Un Debouncer POR documento con ruta, en managed state. Se re-arma al abrir/guardar un
+// archivo y se suspende (drop) alrededor de nuestros propios guardados para evitar el
+// auto-disparo. El handler solo traduce + emite: NUNCA toma locks del workspace ni abre
+// dialogos (gotcha anti-deadlock M4).
 
-/// Watcher del archivo abierto. Se re-arma al abrir/guardar-como (cambia el path) y
-/// se suspende+re-arma alrededor de nuestros propios guardados (evita el auto-disparo).
-struct FileWatcher(
-    Mutex<Option<Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>>>,
-);
+type DocWatcher = Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>;
 
-/// Suspende el watcher (lo dropea -> deja de observar). Se llama ANTES de un write
-/// propio para que notify no detecte nuestro guardado como cambio externo.
-fn suppress_watcher(state: &FileWatcher) {
-    *state.0.lock().unwrap() = None;
+/// Watchers de los documentos abiertos, por `DocId`. Un documento sin ruta no tiene.
+struct FileWatchers(Mutex<HashMap<DocId, DocWatcher>>);
+
+/// Payload de `file-changed-on-disk`: a que documento le cambio el archivo. El frontend
+/// de un solo documento ignora el payload, asi que agregarlo es compatible.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskChange {
+    doc_id: DocId,
+}
+
+/// Suspende el watcher de un documento (lo dropea -> deja de observar). Se llama ANTES de
+/// un write propio para que notify no detecte nuestro guardado como cambio externo, y al
+/// cerrar el documento. Soltar el Debouncer no bloquea: solo marca su hilo para que pare.
+fn suppress_watcher(app: &tauri::AppHandle, id: DocId) {
+    app.state::<FileWatchers>().0.lock().unwrap().remove(&id);
 }
 
 /// Traduce notify EventKind -> apostrophe_core::watcher::ChangeKind (dominio puro).
@@ -423,21 +463,17 @@ fn to_change_kind(kind: &EventKind) -> apostrophe_core::watcher::ChangeKind {
     }
 }
 
-/// Arma (o re-arma) el watcher sobre el archivo actualmente abierto en el store.
-/// Sustituye el Debouncer anterior si lo habia (el drop del anterior detiene su hilo).
-/// Degrada con gracia si notify falla (log + sin watcher, no crashea).
-fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
+/// Arma (o re-arma) el watcher sobre el archivo del documento `id`. Sustituye el
+/// Debouncer anterior de ese documento si lo habia (el drop del anterior detiene su
+/// hilo). Degrada con gracia si notify falla (log + sin watcher, no crashea).
+fn rewatch_doc(app: &tauri::AppHandle, docs: &Docs, id: DocId) {
     use apostrophe_core::watcher::{is_relevant_change, should_notify_frontend};
 
     // Leer el path bajo lock BREVE; soltarlo antes de crear el debouncer.
-    let path = {
-        let guard = doc.lock().unwrap();
-        guard.path().cloned()
-    };
+    let path = { docs.lock().unwrap().get(id).and_then(|d| d.path().cloned()) };
     let Some(path) = path else {
-        // Documento nuevo sin path: no hay archivo que observar.
-        let fw = app.state::<FileWatcher>();
-        suppress_watcher(&fw);
+        // Documento nuevo sin path (o ya cerrado): no hay archivo que observar.
+        suppress_watcher(app, id);
         return;
     };
 
@@ -461,7 +497,7 @@ fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
                 let kind = to_change_kind(&debounced.event.kind);
                 for event_path in &debounced.event.paths {
                     if is_relevant_change(&watched, event_path) && should_notify_frontend(kind) {
-                        let _ = app_handle.emit("file-changed-on-disk", ());
+                        let _ = app_handle.emit("file-changed-on-disk", DiskChange { doc_id: id });
                         return; // un evento por batch es suficiente
                     }
                 }
@@ -475,12 +511,14 @@ fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
             if let Err(e) = debouncer.watch(&path, RecursiveMode::NonRecursive) {
                 eprintln!("watcher: no se pudo observar '{}': {e}", path.display());
                 // Degradar con gracia: sin watcher pero sin crash.
-                let fw = app.state::<FileWatcher>();
-                suppress_watcher(&fw);
+                suppress_watcher(app, id);
                 return;
             }
-            let fw = app.state::<FileWatcher>();
-            *fw.0.lock().unwrap() = Some(debouncer);
+            app.state::<FileWatchers>()
+                .0
+                .lock()
+                .unwrap()
+                .insert(id, debouncer);
         }
         Err(e) => {
             eprintln!("watcher: no se pudo crear el debouncer: {e}");
@@ -489,9 +527,12 @@ fn rewatch_doc(app: &tauri::AppHandle, doc: &Doc) {
     }
 }
 
-/// Documento recien abierto que cruza al frontend.
-#[derive(serde::Serialize)]
+/// Documento recien abierto que cruza al frontend. `doc_id` dice en que documento quedo:
+/// si la ruta ya estaba abierta es el existente (y `content` es su contenido actual, que
+/// puede tener cambios sin guardar).
+#[derive(serde::Serialize, Clone)]
 struct OpenedDoc {
+    doc_id: DocId,
     path: String,
     file_name: String,
     content: String,
@@ -500,42 +541,58 @@ struct OpenedDoc {
 /// Estado para la titlebar: nombre de archivo + indicador de cambios sin guardar.
 #[derive(serde::Serialize)]
 struct DocStatus {
+    doc_id: DocId,
     file_name: Option<String>,
     dirty: bool,
+}
+
+/// Estado del documento `id` para la titlebar, o el error estable si ya no existe.
+fn doc_status(ws: &Workspace, id: DocId) -> Result<DocStatus, String> {
+    let store = ws.get(id).ok_or_else(|| UNKNOWN_DOCUMENT.to_string())?;
+    Ok(DocStatus {
+        doc_id: id,
+        file_name: store.file_name(),
+        dirty: store.is_dirty(),
+    })
 }
 
 /// Sincroniza el texto del editor con el store (se llama en el debounce) y devuelve
 /// el estado para el indicador de "modificado". No abre dialogos -> puede ser sincrono.
 #[tauri::command]
-fn set_content(text: String, doc: tauri::State<'_, Doc>) -> DocStatus {
-    let mut store = doc.lock().unwrap();
-    store.set_content(text);
-    DocStatus {
-        file_name: store.file_name(),
-        dirty: store.is_dirty(),
+fn set_content(
+    text: String,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
+) -> Result<DocStatus, String> {
+    let mut ws = docs.lock().unwrap();
+    let id = ws
+        .resolve_or_create(doc_id)
+        .ok_or_else(|| UNKNOWN_DOCUMENT.to_string())?;
+    if let Some(store) = ws.get_mut(id) {
+        store.set_content(text);
+    }
+    doc_status(&ws, id)
+}
+
+/// Sincroniza `text` (si llega) en el documento `id`. Lo usan los comandos que deciden
+/// sobre el dirty real: el debounce de `set_content` puede ir hasta 250ms atrasado.
+fn sync_text(docs: &Docs, id: DocId, text: Option<String>) {
+    if let Some(text) = text {
+        if let Some(store) = docs.lock().unwrap().get_mut(id) {
+            store.set_content(text);
+        }
     }
 }
 
-/// Guard anti-perdida: si el doc tiene cambios sin guardar, pide confirmacion (dialogo
-/// nativo en spawn_blocking -> sin deadlock). Devuelve `true` si se puede proceder (no
-/// habia cambios, o el usuario eligio descartar). Reusado por open_document, open_path,
-/// confirm_close (M8.1) y new_document (M8.1) con su propio titulo, mensaje y label.
+/// Muestra el dialogo de descarte (nativo, en spawn_blocking -> sin deadlock) y devuelve
+/// `true` si el usuario eligio descartar.
 ///
 /// Patron GNOME: `title` = pregunta corta (encabezado), `message` = explicacion. NO
 /// repetir texto entre ambos: rfd usa el title como encabezado Y como titulo de ventana
 /// (en GTK lo muestra dos veces), asi que repetir la frase la duplica visualmente.
-async fn confirm_discard_if_dirty(
-    app: &tauri::AppHandle,
-    doc: &Doc,
-    labels: ConfirmLabels,
-) -> Result<bool, String> {
-    // El guard del Mutex se suelta al terminar el statement: NO se cruza el .await.
-    let dirty = doc.lock().unwrap().is_dirty();
-    if !dirty {
-        return Ok(true);
-    }
+async fn confirm_discard(app: &tauri::AppHandle, labels: ConfirmLabels) -> Result<bool, String> {
     let app2 = app.clone();
-    let discard = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
             .message(labels.message)
             .title(labels.title)
@@ -547,13 +604,27 @@ async fn confirm_discard_if_dirty(
             .blocking_show()
     })
     .await
-    .map_err(|e| format!("error en el dialogo: {e}"))?;
-    Ok(discard)
+    .map_err(|e| format!("error en el dialogo: {e}"))
 }
 
-/// Lee un .md de disco a un OpenedDoc y lo fija en el store. Unica fuente del flujo
-/// "leer archivo -> estado del documento", reusada por el dialogo (open_document), el
-/// arranque en frio (setup) y la apertura via asociacion (open_path).
+/// Guard anti-perdida: si el documento `id` tiene cambios sin guardar, pide
+/// confirmacion. Devuelve `true` si se puede proceder (no habia cambios, el documento ya
+/// no existe, o el usuario eligio descartar). Reusado por open_document, open_path,
+/// new_document y close_document con su propio titulo, mensaje y label.
+async fn confirm_discard_if_dirty(
+    app: &tauri::AppHandle,
+    docs: &Docs,
+    id: DocId,
+    labels: ConfirmLabels,
+) -> Result<bool, String> {
+    // El guard del Mutex se suelta al terminar el statement: NO se cruza el .await.
+    let dirty = docs.lock().unwrap().get(id).is_some_and(|d| d.is_dirty());
+    if !dirty {
+        return Ok(true);
+    }
+    confirm_discard(app, labels).await
+}
+
 /// Ruta ABSOLUTA del documento. Abrirlo desde una terminal (`apostrophe.exe nota.md`)
 /// trae una relativa, cuya carpeta es `""`: no serviria para resolver sus imagenes ni como
 /// directorio actual de pandoc al exportar. Se resuelve contra el directorio actual, sin
@@ -563,29 +634,55 @@ fn absolute_doc_path(path: PathBuf) -> PathBuf {
     std::path::absolute(&path).unwrap_or(path)
 }
 
-fn load_path_into_store(
+/// OpenedDoc con el estado ACTUAL del documento `id` en el workspace.
+fn opened_doc(ws: &Workspace, id: DocId) -> Result<OpenedDoc, String> {
+    let store = ws.get(id).ok_or_else(|| UNKNOWN_DOCUMENT.to_string())?;
+    let path = store.path().cloned().unwrap_or_default();
+    Ok(OpenedDoc {
+        doc_id: id,
+        path: path.to_string_lossy().into_owned(),
+        file_name: store.file_name().unwrap_or_default(),
+        content: store.content().to_owned(),
+    })
+}
+
+/// Lee un .md de disco y lo fija en el workspace. Unica fuente del flujo "leer archivo ->
+/// estado del documento", reusada por el dialogo (open_document), el arranque en frio
+/// (setup), la apertura via asociacion (open_path) y la recarga (reload_from_disk).
+///
+/// `into = Some(id)` carga el archivo DENTRO de ese documento (el flujo de un solo
+/// documento: abrir reemplaza al actual); `None` lo abre como documento nuevo. En ambos
+/// casos, si la ruta ya esta abierta en OTRO documento, se activa ese sin releer el disco
+/// ni pisar sus cambios.
+///
+/// Devuelve el documento y si se cargo de disco (`true`): en ese caso hay que (re)armar
+/// su watcher.
+fn load_path(
     app: &tauri::AppHandle,
     path: PathBuf,
-    doc: &Doc,
-) -> Result<OpenedDoc, String> {
+    docs: &Docs,
+    into: Option<DocId>,
+) -> Result<(OpenedDoc, bool), String> {
     let path = absolute_doc_path(path);
+    {
+        let mut ws = docs.lock().unwrap();
+        if let Some(existing) = ws.find_by_path(&path).filter(|&id| Some(id) != into) {
+            ws.activate(existing);
+            return Ok((opened_doc(&ws, existing)?, false));
+        }
+    }
     let bytes = std::fs::read(&path).map_err(|e| format!("no se pudo leer el archivo: {e}"))?;
     let content = apostrophe_core::encoding::decode_bytes(&bytes).text;
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let path_str = path.to_string_lossy().into_owned();
     // M16: este es el UNICO punto por el que pasa "archivo -> estado del documento"
     // (dialogo, asociacion .md, arranque en frio y recarga), asi que registrar el reciente
     // aca cubre todas las vias de apertura sin repetir la llamada en cada camino.
     remember_recent(app, &path);
-    doc.lock().unwrap().open(path, content.clone());
-    Ok(OpenedDoc {
-        path: path_str,
-        file_name,
-        content,
-    })
+    let mut ws = docs.lock().unwrap();
+    // Si el destino se cerro mientras se leia el disco, se abre como documento nuevo.
+    let opened = into
+        .and_then(|target| ws.open_path_into(target, path.clone(), content.clone()))
+        .unwrap_or_else(|| ws.open_path(path, content));
+    Ok((opened_doc(&ws, opened.id)?, !opened.already_open))
 }
 
 // --- M16: documentos recientes ---
@@ -668,16 +765,31 @@ pub struct ConfirmLabels {
     pub cancel: String,
 }
 
-/// Abre un .md via DIALOGO nativo. Si el documento actual tiene cambios sin guardar,
-/// CONFIRMA antes (anti-perdida, review M4). `async` + dialogos en spawn_blocking.
+/// Abre un .md via DIALOGO nativo. `async` + dialogos en spawn_blocking.
+///
+/// Dos modos:
+/// - por defecto (frontend de un solo documento): el archivo REEMPLAZA al documento
+///   destino (`doc_id` o el activo), asi que si tiene cambios sin guardar se CONFIRMA
+///   antes (anti-perdida, review M4).
+/// - `new_tab = true`: el archivo se abre como documento nuevo (o se activa si ya estaba
+///   abierto). No se pierde nada, asi que no hay confirmacion.
 #[tauri::command]
 async fn open_document(
     app: tauri::AppHandle,
     labels: ConfirmLabels,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    new_tab: Option<bool>,
+    docs: tauri::State<'_, Docs>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
-        return Ok(None); // el usuario cancelo: NO se pierde nada
+    let into = if new_tab.unwrap_or(false) {
+        None
+    } else {
+        Some(target_doc(&docs, doc_id)?)
+    };
+    if let Some(target) = into {
+        if !confirm_discard_if_dirty(&app, &docs, target, labels).await? {
+            return Ok(None); // el usuario cancelo: NO se pierde nada
+        }
     }
 
     // Picker en un hilo de pool (NO en el main thread -> sin deadlock).
@@ -697,111 +809,157 @@ async fn open_document(
     let path = file_path
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
-    let result = load_path_into_store(&app, path, &doc).map(Some);
+    let (opened, fresh) = load_path(&app, path, &docs, into)?;
     // M8.4b: armar el watcher sobre el archivo recien abierto.
-    if result.is_ok() {
-        rewatch_doc(&app, &doc);
+    if fresh {
+        rewatch_doc(&app, &docs, opened.doc_id);
     }
-    result
+    Ok(Some(opened))
 }
 
 /// Capa B: abre un .md por RUTA (no por dialogo). Lo usa la apertura via asociacion
-/// de archivo cuando la app YA esta abierta: single-instance reenvia el path y el
-/// frontend invoca este comando. Aplica el mismo guard anti-perdida que open_document.
+/// de archivo cuando la app YA esta abierta (single-instance reenvia el path y el
+/// frontend invoca este comando) y el menu de recientes. Mismos modos que open_document.
 /// Devuelve None si el usuario cancela.
 #[tauri::command]
 async fn open_path(
     app: tauri::AppHandle,
     path: String,
     labels: ConfirmLabels,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    new_tab: Option<bool>,
+    docs: tauri::State<'_, Docs>,
 ) -> Result<Option<OpenedDoc>, String> {
-    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
-        return Ok(None);
+    let path = absolute_doc_path(PathBuf::from(path));
+    let into = if new_tab.unwrap_or(false) {
+        None
+    } else {
+        Some(target_doc(&docs, doc_id)?)
+    };
+    // Si la ruta ya esta abierta en OTRO documento basta con activarlo: el destino no se
+    // toca, asi que no hay nada que confirmar.
+    let already_elsewhere = {
+        let ws = docs.lock().unwrap();
+        ws.find_by_path(&path).is_some_and(|id| Some(id) != into)
+    };
+    if let (Some(target), false) = (into, already_elsewhere) {
+        if !confirm_discard_if_dirty(&app, &docs, target, labels).await? {
+            return Ok(None);
+        }
     }
-    let result = load_path_into_store(&app, PathBuf::from(path), &doc).map(Some);
+    let (opened, fresh) = load_path(&app, path, &docs, into)?;
     // M8.4b: armar el watcher sobre el archivo recien abierto por ruta.
-    if result.is_ok() {
-        rewatch_doc(&app, &doc);
+    if fresh {
+        rewatch_doc(&app, &docs, opened.doc_id);
     }
-    result
+    Ok(Some(opened))
 }
 
-/// M8.1: confirma el cierre de la ventana si hay cambios sin guardar. La invoca el
-/// handler `onCloseRequested` del frontend. Sincroniza PRIMERO el texto actual del
-/// editor: el debounce de `set_content` puede estar hasta 250ms atrasado, y sin esto
-/// teclear-y-cerrar de inmediato perderia esos ultimos tecleos sin avisar. Devuelve
-/// `true` si se puede cerrar (no habia cambios o el usuario eligio descartar).
+/// M8.1: confirma el cierre de la ventana si hay cambios sin guardar en CUALQUIER
+/// documento. La invoca el handler `onCloseRequested` del frontend. Sincroniza PRIMERO
+/// `text` en el documento destino (`doc_id` o el activo): el debounce de `set_content`
+/// puede estar hasta 250ms atrasado, y sin esto teclear-y-cerrar de inmediato perderia
+/// esos ultimos tecleos sin avisar.
 ///
-/// M8.4a: si se procede con el cierre (limpio o descarte), borra el snapshot de sesion
-/// para que un arranque posterior no lo restaure espuriamente.
+/// Con varios documentos modificados se muestra UNA sola confirmacion para todos. La copia
+/// (incluido el numero de documentos, si se quiere mostrar) la arma el frontend: puede
+/// consultarlo antes con `dirty_documents`. Devuelve `true` si se puede cerrar.
+///
+/// M8.4a: si se procede con el cierre (limpio o descarte), borra los snapshots de la
+/// sesion para que un arranque posterior no los restaure espuriamente.
 #[tauri::command]
 async fn confirm_close(
     app: tauri::AppHandle,
-    text: String,
+    text: Option<String>,
     labels: ConfirmLabels,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<bool, String> {
-    doc.lock().unwrap().set_content(text);
-    let proceed = confirm_discard_if_dirty(&app, &doc, labels).await?;
+    let target = docs.lock().unwrap().resolve(doc_id);
+    if let Some(id) = target {
+        sync_text(&docs, id, text);
+    }
+    let any_dirty = !docs.lock().unwrap().dirty_ids().is_empty();
+    let proceed = if any_dirty {
+        confirm_discard(&app, labels).await?
+    } else {
+        true
+    };
 
     if proceed {
-        // Cierre limpio o descartado: marcar la sesion como cerrando ANTES de borrar el
-        // snapshot para anular cualquier write_snapshot en vuelo que cruce el .await.
+        // Cierre limpio o descartado: marcar la sesion como cerrando ANTES de borrar los
+        // snapshots para anular cualquier write_snapshot en vuelo que cruce el .await.
         session.closing.store(true, Ordering::SeqCst);
-        let id = session.id.clone();
-        if let Ok(dir) = snapshots_dir(&app) {
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                delete_snapshot_files(&dir, &id);
-            })
-            .await;
-        }
+        delete_session_snapshots(&app, &session).await;
     }
     Ok(proceed)
 }
 
-/// M8.1: documento nuevo (Ctrl+N). Sincroniza el texto actual, confirma descarte si hay
-/// cambios sin guardar y, si se procede, resetea el store a documento nuevo vacío.
-/// M8.4b: tras el reset, suelta el watcher (doc nuevo = sin path = sin watcher).
-/// Devuelve el nuevo estado para la titlebar, o `None` si el usuario canceló.
+/// M8.1: documento nuevo (Ctrl+N). Sincroniza `text` (si llega) en el documento destino
+/// (`doc_id` o el activo) y:
+/// - por defecto: confirma descarte si hay cambios sin guardar y, si se procede, resetea
+///   ese documento a uno nuevo vacio (M8.4b: y suelta su watcher, sin path no hay archivo
+///   que observar).
+/// - `new_tab = true`: crea un documento nuevo aparte y lo activa, sin confirmar nada.
+///
+/// Devuelve el estado del documento nuevo para la titlebar, o `None` si el usuario cancelo.
 #[tauri::command]
 async fn new_document(
     app: tauri::AppHandle,
-    text: String,
+    text: Option<String>,
     labels: ConfirmLabels,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    new_tab: Option<bool>,
+    docs: tauri::State<'_, Docs>,
 ) -> Result<Option<DocStatus>, String> {
-    doc.lock().unwrap().set_content(text);
-    if !confirm_discard_if_dirty(&app, &doc, labels).await? {
+    let target = target_doc(&docs, doc_id)?;
+    sync_text(&docs, target, text);
+
+    if new_tab.unwrap_or(false) {
+        let mut ws = docs.lock().unwrap();
+        let id = ws.create_untitled();
+        return doc_status(&ws, id).map(Some);
+    }
+
+    if !confirm_discard_if_dirty(&app, &docs, target, labels).await? {
         return Ok(None);
     }
     let status = {
-        let mut store = doc.lock().unwrap();
+        let mut ws = docs.lock().unwrap();
+        let store = ws
+            .get_mut(target)
+            .ok_or_else(|| UNKNOWN_DOCUMENT.to_string())?;
         store.reset();
-        DocStatus {
-            file_name: store.file_name(),
-            dirty: store.is_dirty(),
-        }
+        ws.activate(target);
+        doc_status(&ws, target)?
     }; // guard se suelta aqui
-       // M8.4b: soltar el watcher (doc nuevo sin path: no hay archivo que observar).
-    suppress_watcher(&app.state::<FileWatcher>());
+
+    // M8.4b: soltar el watcher (doc nuevo sin path: no hay archivo que observar).
+    suppress_watcher(&app, target);
     Ok(Some(status))
 }
 
-/// M8.4b: re-lee el archivo abierto desde disco (usando la deteccion de encoding M8.3)
-/// y devuelve el OpenedDoc para que el frontend reemplace el contenido. Tras recargar,
-/// el store queda LIMPIO (load_path_into_store invoca doc.open, que limpia dirty).
-/// Si no hay path (documento nuevo), devuelve Ok(None). NO re-arma el watcher porque
-/// solo LEE (no cambia el path ni escribe en disco).
+/// M8.4b: re-lee desde disco el archivo del documento destino (`doc_id` o el activo),
+/// con la deteccion de encoding M8.3, y devuelve el OpenedDoc para que el frontend
+/// reemplace el contenido. Tras recargar, el documento queda LIMPIO. Si no tiene path
+/// (documento nuevo), devuelve Ok(None). NO re-arma el watcher porque solo LEE (no cambia
+/// el path ni escribe en disco).
 #[tauri::command]
 async fn reload_from_disk(
     app: tauri::AppHandle,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
 ) -> Result<Option<OpenedDoc>, String> {
-    let path = { doc.lock().unwrap().path().cloned() };
+    let target = target_doc(&docs, doc_id)?;
+    let path = {
+        docs.lock()
+            .unwrap()
+            .get(target)
+            .and_then(|d| d.path().cloned())
+    };
     let Some(path) = path else { return Ok(None) };
-    load_path_into_store(&app, path, &doc).map(Some)
+    load_path(&app, path, &docs, Some(target)).map(|(opened, _)| Some(opened))
 }
 
 /// Guarda: si el doc tiene path escribe ahi; si no, delega en "guardar como".
@@ -812,43 +970,44 @@ async fn reload_from_disk(
 async fn save_document(
     app: tauri::AppHandle,
     text: String,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<Option<DocStatus>, String> {
-    let existing = doc.lock().unwrap().path().cloned();
+    let target = target_doc(&docs, doc_id)?;
+    let existing = {
+        docs.lock()
+            .unwrap()
+            .get(target)
+            .and_then(|d| d.path().cloned())
+    };
     let Some(path) = existing else {
-        return save_document_as(app, text, doc, session).await;
+        return save_document_as(app, text, Some(target), docs, session).await;
     };
     // M8.4b: suspender el watcher antes de escribir para no auto-disparar el evento.
-    suppress_watcher(&app.state::<FileWatcher>());
+    suppress_watcher(&app, target);
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
     // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
     // el resto de la sesion.
     let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
     // M8.4b: re-armar el watcher sobre el mismo path siempre, incluso si fallo el write.
-    rewatch_doc(&app, &doc);
+    rewatch_doc(&app, &docs, target);
     // Ahora si: propagar el error si lo hay.
     write_result?;
     // Lock BREVE (patron M4): set_content + mark_clean bajo un bloque acotado para que
     // el MutexGuard NO cruce el .await del spawn_blocking que viene despues.
     let status = {
-        let mut store = doc.lock().unwrap();
-        store.set_content(text);
-        store.mark_clean();
-        DocStatus {
-            file_name: store.file_name(),
-            dirty: false,
+        let mut ws = docs.lock().unwrap();
+        if let Some(store) = ws.get_mut(target) {
+            store.set_content(text);
+            store.mark_clean();
         }
+        doc_status(&ws, target)?
     }; // guard se suelta aqui
-       // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente para no
-       // restaurar contenido ya guardado si hay un crash en los proximos segundos (best-effort).
-    if let Ok(dir) = snapshots_dir(&app) {
-        let id = session.id.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            delete_snapshot_files(&dir, &id);
-        })
-        .await;
-    }
+
+    // El .md ya esta a salvo: borrar su snapshot para no restaurar contenido ya guardado
+    // si hay un crash en los proximos segundos (best-effort).
+    delete_doc_snapshot(&app, &session, target).await;
     Ok(Some(status))
 }
 
@@ -858,9 +1017,11 @@ async fn save_document(
 async fn save_document_as(
     app: tauri::AppHandle,
     text: String,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<Option<DocStatus>, String> {
+    let target = target_doc(&docs, doc_id)?;
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
@@ -879,15 +1040,15 @@ async fn save_document_as(
         .into_path()
         .map_err(|e| format!("ruta invalida: {e}"))?;
     // M8.4b: suspender el watcher antes de escribir (la ruta aun puede ser la antigua).
-    suppress_watcher(&app.state::<FileWatcher>());
+    suppress_watcher(&app, target);
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
     // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
     // el resto de la sesion.
     let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
     if write_result.is_err() {
         // Camino de error: re-armar sobre la ruta anterior (saved_as no se llamo, el
-        // store aun tiene el path anterior).
-        rewatch_doc(&app, &doc);
+        // documento aun tiene el path anterior).
+        rewatch_doc(&app, &docs, target);
         return write_result.map(|_| None);
     }
     // Lock BREVE (patron M4): saved_as + set_content bajo un bloque acotado para que
@@ -896,25 +1057,85 @@ async fn save_document_as(
     // (Guardar sobre la ruta existente no hace falta: ya entro al abrirse.)
     remember_recent(&app, &path);
     let status = {
-        let mut store = doc.lock().unwrap();
+        let mut ws = docs.lock().unwrap();
+        let store = ws
+            .get_mut(target)
+            .ok_or_else(|| UNKNOWN_DOCUMENT.to_string())?;
         store.set_content(text);
         store.saved_as(path);
-        DocStatus {
-            file_name: store.file_name(),
-            dirty: false,
-        }
+        doc_status(&ws, target)?
     }; // guard se suelta aqui
-       // El .md ya esta a salvo: borrar el snapshot de sesion sincrónicamente (best-effort).
-    if let Ok(dir) = snapshots_dir(&app) {
-        let id = session.id.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            delete_snapshot_files(&dir, &id);
-        })
-        .await;
-    }
+
+    // El .md ya esta a salvo: borrar su snapshot (best-effort).
+    delete_doc_snapshot(&app, &session, target).await;
     // M8.4b: re-armar el watcher sobre el NUEVO path (saved_as ya lo fijo en el store).
-    rewatch_doc(&app, &doc);
+    rewatch_doc(&app, &docs, target);
     Ok(Some(status))
+}
+
+// --- Pestañas: comandos que solo usa el frontend con varios documentos ---
+
+/// Activa un documento (la pestaña que el usuario eligio). Los comandos sin `doc_id`
+/// apuntan al activo. `false` si el documento ya no existe.
+#[tauri::command]
+fn activate_document(doc_id: DocId, docs: tauri::State<'_, Docs>) -> bool {
+    docs.lock().unwrap().activate(doc_id)
+}
+
+/// Cierra un documento (una pestaña). Sincroniza antes `text` si llega y, si hay cambios
+/// sin guardar, confirma con `labels`. Al cerrar suelta su watcher y borra su snapshot.
+/// Devuelve `true` si quedo cerrado (tambien si ya no existia) y `false` si el usuario
+/// cancelo. Si era el activo, el activo pasa a la pestaña vecina; si era el ultimo, el
+/// workspace queda vacio hasta que se abra o cree otro.
+#[tauri::command]
+async fn close_document(
+    app: tauri::AppHandle,
+    doc_id: DocId,
+    labels: ConfirmLabels,
+    text: Option<String>,
+    docs: tauri::State<'_, Docs>,
+    session: tauri::State<'_, SnapshotSession>,
+) -> Result<bool, String> {
+    sync_text(&docs, doc_id, text);
+    if !confirm_discard_if_dirty(&app, &docs, doc_id, labels).await? {
+        return Ok(false);
+    }
+    docs.lock().unwrap().close(doc_id);
+    suppress_watcher(&app, doc_id);
+    delete_doc_snapshot(&app, &session, doc_id).await;
+    Ok(true)
+}
+
+/// Fila de `list_documents`. `name` es `None` en un documento sin guardar: el texto
+/// "Sin titulo" lo pone el frontend desde su catalogo de i18n.
+#[derive(serde::Serialize)]
+struct DocumentInfo {
+    doc_id: DocId,
+    path: Option<String>,
+    name: Option<String>,
+    dirty: bool,
+}
+
+/// Documentos abiertos, en orden de apertura.
+#[tauri::command]
+fn list_documents(docs: tauri::State<'_, Docs>) -> Vec<DocumentInfo> {
+    docs.lock()
+        .unwrap()
+        .iter()
+        .map(|(id, d)| DocumentInfo {
+            doc_id: id,
+            path: d.path().map(|p| p.to_string_lossy().into_owned()),
+            name: d.file_name(),
+            dirty: d.is_dirty(),
+        })
+        .collect()
+}
+
+/// Ids de los documentos con cambios sin guardar, en orden de apertura. Sirve al
+/// frontend para armar la copia del dialogo de cierre ("3 documentos sin guardar").
+#[tauri::command]
+fn dirty_documents(docs: tauri::State<'_, Docs>) -> Vec<DocId> {
+    docs.lock().unwrap().dirty_ids()
 }
 
 /// Exporta el markdown al formato que el usuario elija en el dialogo nativo (M12).
@@ -928,21 +1149,17 @@ async fn save_document_as(
 #[tauri::command]
 async fn export_document(
     app: tauri::AppHandle,
-    doc: tauri::State<'_, Doc>,
+    docs: tauri::State<'_, Docs>,
     text: String,
     css: String,
     accent: String,
+    doc_id: Option<DocId>,
 ) -> Result<Option<String>, String> {
     use apostrophe_core::convert::ExportFormat;
 
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
     // Es contra el que se resuelven las rutas relativas de las imagenes.
-    let doc_dir = {
-        doc.lock()
-            .unwrap()
-            .path()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-    };
+    let doc_dir = target_doc_dir(&docs, doc_id);
 
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -1122,12 +1339,12 @@ fn load_dictionary(app: &tauri::AppHandle) {
 
 // --- M8.4a: autosave por snapshots ---
 // El snapshot se escribe en app_local_data_dir()/snapshots/ (no roaming). Un snapshot
-// por sesion (el session id es un uuid v4 que se genera en run() y se mantiene toda la
-// sesion). Si hay un snapshot huerfano al arrancar (crash), se restaura en el frontend.
+// por DOCUMENTO abierto, nombrado con el id de sesion (uuid v4 que se genera en run() y
+// se mantiene toda la sesion) y el DocId. Si hay un snapshot huerfano al arrancar (crash), se restaura en el frontend.
 // El .md real del usuario NUNCA se toca: el snapshot es un respaldo paralelo.
 
-/// Id unico de esta sesion (uuid v4): nombra el snapshot de autosave. Se genera una
-/// vez en run() y se reusa todo el tiempo (un snapshot por sesion, se sobreescribe).
+/// Id unico de esta sesion (uuid v4): junto con el DocId nombra el snapshot de cada
+/// documento. Se genera una vez en run() y se reusa todo el tiempo.
 /// `closing` es seteado por confirm_close justo antes de borrar el snapshot, para
 /// anular cualquier write_snapshot en vuelo que ya haya pasado el guard del frontend.
 struct SnapshotSession {
@@ -1238,13 +1455,44 @@ fn find_latest_orphan(dir: &Path) -> Option<(String, RestoredSnapshot)> {
     ))
 }
 
-/// Escribe (o borra) el snapshot de la sesion segun la politica de should_snapshot.
-/// Lo invoca el frontend en cada tick del timer de autosave.
+/// Borra el snapshot de UN documento de la sesion (best-effort, fuera del hilo de
+/// eventos). Se llama al guardarlo y al cerrarlo.
+async fn delete_doc_snapshot(app: &tauri::AppHandle, session: &SnapshotSession, id: DocId) {
+    let Ok(dir) = snapshots_dir(app) else { return };
+    let snap_id = apostrophe_core::snapshot::doc_snapshot_id(&session.id, id);
+    let _ =
+        tauri::async_runtime::spawn_blocking(move || delete_snapshot_files(&dir, &snap_id)).await;
+}
+
+/// Borra TODOS los snapshots de esta sesion (los de cada documento). Se llama al cerrar
+/// la ventana: por prefijo de sesion y no por la lista de documentos, asi tambien caen
+/// los de un documento cerrado cuyo write estaba en vuelo.
+async fn delete_session_snapshots(app: &tauri::AppHandle, session: &SnapshotSession) {
+    let Ok(dir) = snapshots_dir(app) else { return };
+    let session_id = session.id.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if apostrophe_core::snapshot::is_session_file(&name, &session_id) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    })
+    .await;
+}
+
+/// Escribe (o borra) el snapshot del documento destino (`doc_id` o el activo) segun la
+/// politica de should_snapshot. Lo invoca el frontend en cada tick del timer de
+/// autosave, una vez por documento.
 #[tauri::command]
 async fn write_snapshot(
     app: tauri::AppHandle,
     text: String,
-    doc: tauri::State<'_, Doc>,
+    doc_id: Option<DocId>,
+    docs: tauri::State<'_, Docs>,
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<(), String> {
     // Guard de cierre: si confirm_close ya seto la bandera, no re-escribir el snapshot
@@ -1253,21 +1501,37 @@ async fn write_snapshot(
         return Ok(());
     }
     // Lock BREVE: leer dirty + path, soltar ANTES de tocar disco (no cruzar el .await).
-    let (dirty, path) = {
-        let s = doc.lock().unwrap();
-        (s.is_dirty(), s.path().cloned())
+    let state = {
+        let ws = docs.lock().unwrap();
+        ws.resolve(doc_id)
+            .and_then(|id| ws.get(id).map(|d| (id, d.is_dirty(), d.path().cloned())))
     };
-    let id = session.id.clone();
+    let Some((id, dirty, path)) = state else {
+        return Ok(()); // el documento ya se cerro: no hay nada que respaldar
+    };
+    let snap_id = apostrophe_core::snapshot::doc_snapshot_id(&session.id, id);
     let dir = snapshots_dir(&app)?;
 
     if apostrophe_core::snapshot::should_snapshot(dirty, text.len()) {
-        tauri::async_runtime::spawn_blocking(move || write_snapshot_files(&dir, &id, &text, path))
-            .await
-            .map_err(|e| format!("error de autosave: {e}"))?
+        let job_dir = dir.clone();
+        let job_id = snap_id.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            write_snapshot_files(&job_dir, &job_id, &text, path)
+        })
+        .await
+        .map_err(|e| format!("error de autosave: {e}"))??;
+        // Si el documento se cerro mientras se escribia, su snapshot quedaria huerfano y
+        // se ofreceria restaurarlo en el proximo arranque: se borra.
+        if !docs.lock().unwrap().contains(id) {
+            let _ =
+                tauri::async_runtime::spawn_blocking(move || delete_snapshot_files(&dir, &snap_id))
+                    .await;
+        }
+        Ok(())
     } else {
-        // Doc limpio o vacio: el .md real esta a salvo -> borrar el snapshot de sesion.
+        // Doc limpio o vacio: el .md real esta a salvo -> borrar su snapshot.
         let _ = tauri::async_runtime::spawn_blocking(move || {
-            delete_snapshot_files(&dir, &id);
+            delete_snapshot_files(&dir, &snap_id);
         })
         .await;
         Ok(())
@@ -1360,11 +1624,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // M11.1: preferencias persistentes (settings.json). El frontend lee/escribe via JS.
         .plugin(tauri_plugin_store::Builder::new().build())
-        .manage(Mutex::new(DocumentStore::new()))
+        // Pestañas: el workspace arranca con un documento nuevo vacio, como antes.
+        .manage(Mutex::new(initial_workspace()))
         .manage(SpellState(RwLock::new(None)))
         .manage(PendingFile(Mutex::new(None)))
-        // M8.4b: watcher de cambios externos (None hasta que se abre un archivo).
-        .manage(FileWatcher(Mutex::new(None)))
+        // M8.4b: watchers de cambios externos, uno por documento con ruta.
+        .manage(FileWatchers(Mutex::new(HashMap::new())))
         // M8.4a: session id generado en run() para que este disponible en setup() sin mover.
         .manage(SnapshotSession {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1393,12 +1658,13 @@ pub fn run() {
             // app abre vacia. El pending file tiene PRECEDENCIA sobre el restore.
             let argv: Vec<String> = std::env::args().collect();
             if let Some(path) = file_arg(&argv) {
-                let doc = app.state::<Doc>();
-                match load_path_into_store(app.handle(), PathBuf::from(&path), &doc) {
-                    Ok(opened) => {
-                        *app.state::<PendingFile>().0.lock().unwrap() = Some(opened);
+                let docs = app.state::<Docs>();
+                let into = docs.lock().unwrap().active();
+                match load_path(app.handle(), PathBuf::from(&path), &docs, into) {
+                    Ok((opened, _)) => {
                         // M8.4b: armar el watcher sobre el archivo del arranque en frio.
-                        rewatch_doc(app.handle(), &doc);
+                        rewatch_doc(app.handle(), &docs, opened.doc_id);
+                        *app.state::<PendingFile>().0.lock().unwrap() = Some(opened);
                     }
                     Err(e) => eprintln!("no se pudo abrir el archivo de inicio '{path}': {e}"),
                 }
@@ -1442,7 +1708,11 @@ pub fn run() {
             take_pending_file,
             write_snapshot,
             take_pending_restore,
-            reload_from_disk
+            reload_from_disk,
+            activate_document,
+            close_document,
+            list_documents,
+            dirty_documents
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
