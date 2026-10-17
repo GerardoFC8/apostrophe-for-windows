@@ -8,6 +8,12 @@
 #   src-tauri = adaptador primario (Tauri). crates/apostrophe-core = nucleo de dominio.
 #   crates/apostrophe-sidecars = adaptador secundario (pandoc, typst, diccionario), sin
 #   Tauri: lo comparten la GUI y la CLI.
+#   crates/apostrophe-cli = segundo adaptador primario (la CLI `elision`), sin Tauri.
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/apostrophe-core", "crates/apostrophe-sidecars"]
+members = [
+    "src-tauri",
+    "crates/apostrophe-core",
+    "crates/apostrophe-sidecars",
+    "crates/apostrophe-cli",
+]

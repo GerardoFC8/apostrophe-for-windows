@@ -1,0 +1,18 @@
+[package]
+name = "apostrophe-cli"
+version = "0.3.0"
+edition = "2021"
+description = "CLI `elision` (adaptador primario, ADR-0001): export, estadisticas, tablas, ortografia y apertura de la GUI para agentes de IA, con salida estable y sin interaccion. Sin dependencias de Tauri."
+authors = ["Gerardo Franco"]
+
+[dependencies]
+# Dominio puro: estadisticas, tablas, ortografia. `serde` serializa Stats/ReadTime al JSON.
+apostrophe-core = { path = "../apostrophe-core", features = ["serde"] }
+# Adaptador secundario compartido con la GUI: sidecars, export, imagenes y diccionario.
+apostrophe-sidecars = { path = "../apostrophe-sidecars" }
+# Parser de argumentos con ayuda por subcomando y sugerencias, que es lo que leen los
+# agentes. Sin `color` ni el resto de los defaults: la salida es la misma en cualquier
+# terminal (y sin codigos ANSI cuando stdout es un pipe).
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
