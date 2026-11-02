@@ -1,6 +1,6 @@
 [package]
 name = "apostrophe-cli"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "CLI `elision` (adaptador primario, ADR-0001): export, estadisticas, tablas, ortografia y apertura de la GUI para agentes de IA, con salida estable y sin interaccion. Sin dependencias de Tauri."
 authors = ["Gerardo Franco"]

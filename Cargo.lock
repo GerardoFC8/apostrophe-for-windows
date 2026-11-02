@@ -55,7 +55,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "apostrophe"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "apostrophe-cli",
  "apostrophe-core",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "apostrophe-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "apostrophe-core",
  "apostrophe-sidecars",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "apostrophe-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "apostrophe-sidecars"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "apostrophe-core",
  "base64 0.22.1",
