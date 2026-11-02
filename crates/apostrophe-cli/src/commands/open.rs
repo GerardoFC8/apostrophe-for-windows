@@ -16,8 +16,9 @@ use crate::error::{CliError, ErrorCode};
 use crate::{input, Env};
 
 /// Ejecutable de la GUI en la carpeta de instalacion (sin `.exe`). Es el nombre del
-/// paquete de Tauri; cambiara con el renombre a Elision, y no puede ser `elision`: en
-/// Windows chocaria con la CLI.
+/// paquete de Cargo de `src-tauri`, no el `productName` (Elision): sin `mainBinaryName`,
+/// Tauri conserva el binario que sale de cargo. No puede ser `elision`: en Windows
+/// chocaria con la CLI.
 pub const GUI_BINARY: &str = "apostrophe";
 
 #[derive(Debug, Serialize)]

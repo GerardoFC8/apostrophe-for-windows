@@ -89,7 +89,7 @@ jobs:
           $args = @(
             "release", "create", "${{ github.ref_name }}",
             "--draft",
-            "--title", "Apostrophe para Windows ${{ github.ref_name }}"
+            "--title", "Elision ${{ github.ref_name }}"
           )
           if (Test-Path $notes) { $args += @("--notes-file", $notes) }
           else { $args += "--generate-notes" }

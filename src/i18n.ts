@@ -318,7 +318,7 @@ const ES: Messages = {
   "shortcuts.showShortcuts": "Atajos de teclado",
 
   "about.title": "Acerca de",
-  "about.name": "Apostrophe para Windows",
+  "about.name": "Elision",
   "about.version": "Versión",
   "about.description": "Editor de Markdown nativo para Windows. Port de Apostrophe (GNOME).",
   "about.repo": "Repositorio",
@@ -467,7 +467,7 @@ const EN: Messages = {
   "shortcuts.showShortcuts": "Keyboard shortcuts",
 
   "about.title": "About",
-  "about.name": "Apostrophe for Windows",
+  "about.name": "Elision",
   "about.version": "Version",
   "about.description": "Native Markdown editor for Windows. A port of Apostrophe (GNOME).",
   "about.repo": "Repository",

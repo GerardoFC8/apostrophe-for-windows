@@ -179,7 +179,7 @@ async fn toggle_preview_window(app: tauri::AppHandle) -> Result<bool, String> {
         PREVIEW_WINDOW,
         tauri::WebviewUrl::App("preview.html".into()),
     )
-    .title("Apostrophe")
+    .title("Elision")
     .inner_size(700.0, 800.0)
     .build()
     .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?;
