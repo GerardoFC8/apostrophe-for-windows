@@ -12,11 +12,186 @@ GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
 - Editor CodeMirror 6 con titlebar Fluent custom.
 - Vista previa en vivo vía **pandoc** (bundleado como sidecar, sin dependencias del sistema).
 - Abrir / guardar `.md` con diálogos nativos.
+- Varios documentos abiertos a la vez, cada uno en su pestaña (ver [Pestañas](#pestañas)).
 - Temas claro / oscuro / sepia.
 - Exportación a **PDF, HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en
   el desplegable "Guardar como tipo" del diálogo. Lo resuelven los sidecars bundleados
   (pandoc y typst): no necesitas instalar nada más.
 - Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
+- CLI `elision` para agentes de IA y scripts (ver [CLI para agentes](#cli-para-agentes-elision)).
+
+## Pestañas
+
+Cada documento Markdown se abre en su propia pestaña, y puedes tener varios abiertos a la vez.
+
+> **Cambio de atajo:** el modo Hemingway pasó de `Ctrl+T` a **`Ctrl+Shift+H`**. `Ctrl+T`
+> ahora abre una pestaña nueva, como en cualquier programa con pestañas.
+
+| Atajo | Acción |
+|---|---|
+| `Ctrl+T` o `Ctrl+N` | Pestaña nueva con un documento sin título |
+| `Ctrl+W` | Cerrar la pestaña activa |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Pestaña siguiente / anterior |
+| `Ctrl+Shift+H` | Modo Hemingway |
+
+**Barra de pestañas**
+
+- **●** marca los documentos con cambios sin guardar.
+- Al pasar el mouse sobre una pestaña se ve la ruta completa del archivo.
+- Para cerrar una pestaña: la **×**, el clic central, `Ctrl+W` o `Supr` con la pestaña
+  enfocada. Si tiene cambios, se pide confirmación.
+- Con muchas pestañas, la barra se desplaza en horizontal (también con la rueda del mouse).
+
+**Abrir archivos**
+
+- `Ctrl+O`, los recientes, el doble clic sobre un `.md` y `elision open a.md b.md` abren cada
+  archivo en su propia pestaña.
+- Si el archivo ya está abierto, solo se activa su pestaña.
+- La pestaña inicial sin título y vacía se reemplaza por el archivo que abres.
+
+**Qué guarda cada pestaña y qué es común**
+
+| Por pestaña | Común a todas |
+|---|---|
+| Historial de deshacer, cursor y desplazamiento | Modos de escritura: enfoque, Hemingway y vista |
+
+La vista previa (también la ventana desacoplada) y las estadísticas siguen a la pestaña activa.
+
+**Cierre y recuperación**
+
+- Al cerrar la ventana con varios documentos sin guardar, se pregunta **una sola vez** e
+  indica cuántos tienen cambios.
+- Tras un cierre inesperado, cada documento se recupera en su propia pestaña, también si
+  abres la app con un archivo.
+- "Guardar como" sobre un archivo que ya está abierto en otra pestaña se rechaza con un aviso:
+  cierra esa pestaña o elige otro nombre.
+
+## Instalación
+
+La forma más sencilla es con [winget](https://learn.microsoft.com/windows/package-manager/winget/),
+el gestor de paquetes que ya viene en Windows 10 y 11. Desde PowerShell o la terminal:
+
+```powershell
+winget install GerardoFC8.ApostropheForWindows
+```
+
+No pide permisos de administrador: la app se instala solo para tu usuario.
+
+Para actualizar o desinstalar:
+
+```powershell
+winget upgrade GerardoFC8.ApostropheForWindows
+winget uninstall GerardoFC8.ApostropheForWindows
+```
+
+> La versión de winget puede tardar unos días en alcanzar a la última release. Si
+> quieres la más reciente, descarga `Apostrophe_<versión>_x64-setup.exe` desde
+> [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) y ejecútalo
+> (ver ["Windows protegió tu PC"](#windows-protegió-tu-pc--es-normal)).
+
+## CLI para agentes (`elision`)
+
+El instalador también deja en el PATH el comando **`elision`**: una CLI para agentes de IA
+y scripts. Usa los mismos pandoc, typst y diccionario que la app, nunca pide confirmación y
+su salida es estable. El contrato son los **códigos de salida y de error**; los mensajes van
+en inglés y solo sirven de diagnóstico.
+
+> Después de instalar, **cierra por completo** Windows Terminal, VS Code o el programa desde
+> el que abres la terminal, y vuelve a abrirlo. Una pestaña nueva no basta: hereda el PATH
+> que tenía ese programa al arrancar, así que ni ella ni los agentes que corran en ella
+> encuentran `elision`. Si no quieres cerrarlo, recarga el PATH en la pestaña actual:
+>
+> ```powershell
+> $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+> ```
+
+```powershell
+elision --help
+elision stats notas.md --json
+elision export notas.md -o notas.pdf
+```
+
+### Comandos
+
+| Comando | Qué hace | Termina con 1 si… |
+|---|---|---|
+| `export <in> -o <out> [--to <fmt>]` | Convierte a PDF, HTML, ODT, DOCX, EPUB o LaTeX. El formato sale de la extensión de `-o`, o de `--to`. Sobrescribe sin preguntar. | — |
+| `stats <in>` | Caracteres, palabras, oraciones, párrafos y tiempo de lectura. | — |
+| `tables <in> [--check \| --write]` | Revisa (por defecto) o reescribe la alineación de todas las tablas. | hay tablas desalineadas (solo `--check`) |
+| `spell <in> [--dict-dir <dir>]` | Ortografía en español, con línea y columna (base 1). | hay errores |
+| `open <archivos>...` | Abre cada archivo en su propia pestaña del editor, sin esperar a que se cierre. | — |
+
+- **Entrada estándar:** `<in>` puede ser `-` (salvo con `tables --write`). Se decodifica igual
+  que un archivo: UTF-8 u otra codificación que la app sepa abrir. Con `-`, `export` no tiene
+  carpeta de documento y omite las imágenes relativas.
+- **`--json`**, antes o después del subcomando: una sola línea JSON en stdout, solo ASCII
+  (lo demás sale como `\uXXXX`), también para los errores. Sin `--json`, stdout lleva solo
+  datos y stderr los diagnósticos.
+- **Diccionario:** `--dict-dir`; si no, la variable `ELISION_DICT_DIR`; si no, el que trae la
+  instalación. La primera opción indicada se usa sin caer a la siguiente: si falla, el
+  resultado es `dictionary_missing`.
+- Las rutas relativas se resuelven contra la carpeta actual, y las imágenes del documento,
+  contra la carpeta del documento: puedes exportar desde cualquier lugar.
+
+### Códigos de salida
+
+| Salida | Significado | `error.code` (JSON) |
+|---|---|---|
+| 0 | Éxito | — |
+| 1 | Hallazgos: errores de ortografía o tablas desalineadas | — (`"ok": true`) |
+| 2 | Uso inválido: argumentos, formato desconocido | `usage` |
+| 3 | Falta pandoc, typst, el editor o el diccionario | `sidecar_missing`, `dictionary_missing` |
+| 4 | Pandoc o typst fallaron al convertir | `conversion_failed` |
+| 5 | Error de E/S: archivo inexistente, salida no escribible | `io_error` |
+
+Un error con `--json`:
+
+```json
+{"ok":false,"error":{"code":"usage","message":"cannot tell the export format from x.xyz; use --to with one of: html, pdf, odt, docx, epub, latex"}}
+```
+
+### Ejemplos para un agente
+
+```powershell
+# Ortografía: lee el JSON, no el texto.
+elision spell capitulo.md --json
+# {"ok":true,"file":"C:\\notas\\capitulo.md","language":"es","misspellings":[{"line":7,"column":6,"word":"mundoo","suggestions":["mundo","mundos","mundo o","mundano"]}]}
+
+# Tablas: reescribe solo si --check encontró algo (código 1).
+elision tables capitulo.md --check --json
+if ($LASTEXITCODE -eq 1) { elision tables capitulo.md --write }
+
+# Export desde otra carpeta; las imágenes relativas se resuelven contra el documento.
+elision export docs\capitulo.md -o C:\salida\capitulo.pdf --json
+# {"ok":true,"output":"C:\\salida\\capitulo.pdf","format":"pdf"}
+```
+
+### Límites conocidos
+
+- **Acentos en tuberías de PowerShell.** Windows PowerShell 5.1 envía texto a otros
+  programas con `$OutputEncoding`, que por defecto es ASCII: `Get-Content x.md | elision stats -`
+  convierte los acentos en `?`. Además, PowerShell decodifica la salida de texto con la
+  página de códigos de la consola. Pasa la ruta del archivo en lugar de `-`, lee los
+  resultados con `--json` (solo ASCII) y exporta con `-o`.
+- **Precedencia en el PATH.** La carpeta de instalación también contiene `pandoc.exe` y
+  `typst.exe`, y se agrega **al final** del PATH. Con el instalador NSIS (el de winget) gana
+  cualquier pandoc o typst que ya esté antes en el PATH. Con el MSI la carpeta va al `Path`
+  del sistema, que Windows antepone al del usuario: los incluidos tapan a los que hayas
+  instalado solo para tu usuario. `elision` siempre usa los suyos.
+- **`tables --write` no es atómico:** reescribe el archivo en su lugar, igual que el guardado
+  de la app. Si el archivo está abierto en la app, esta muestra el aviso de cambio externo.
+- **Tablas omitidas:** `tables` informa, sin arreglarlas, las tablas que no sabe alinear
+  (barra escapada `\|`, filas con celdas de más, sangría mixta o tabla dentro de una cita).
+  Salen en `skipped` del JSON (`escaped_pipe`, `extra_cells`, `mixed_indent`, `blockquote`)
+  y como aviso en stderr; no cambian el código de salida.
+- **HTML sin tema:** el export a HTML usa el estilo por defecto de pandoc, no el tema de la
+  app.
+- **Sin firma:** `elision.exe` tampoco está firmado. Algunos antivirus desconfían de
+  ejecutables nuevos sin firma y pueden bloquearlo o ponerlo en cuarentena; si pasa, agrega
+  una excepción para la carpeta de instalación.
+
+En desarrollo, sin instalar: `cargo run -p apostrophe --bin elision -- --help`. La
+arquitectura está en [`docs/adr/0002-cli-adaptador-primario.md`](docs/adr/0002-cli-adaptador-primario.md).
 
 ## Instalación
 
@@ -97,9 +272,15 @@ Definida en `src-tauri/tauri.conf.json` (`bundle`):
 - **`installMode: "currentUser"`** — instala por usuario, sin pedir permisos de
   administrador (UAC). Para distribución por-máquina, cambiar a `"perMachine"`.
 - **Idiomas del instalador**: español (con selector de idioma).
-- **Asociación de archivos `.md` / `.markdown`** — declarada en el instalador. El
-  comportamiento de "abrir con doble-click" se implementa en un slice aparte
-  (requiere `tauri-plugin-single-instance` y se prueba en Windows).
+- **Asociación de archivos `.md` / `.markdown`** — declarada en el instalador. El doble
+  clic abre el archivo en una pestaña; si la app ya está abierta, `tauri-plugin-single-instance`
+  le reenvía la ruta en lugar de abrir otra ventana.
+- **`elision` en el PATH** — el instalador NSIS agrega la carpeta de instalación al final
+  del `Path` de tu usuario (`src-tauri/windows/hooks.nsh`, que ejecuta `elision-path.ps1`);
+  el MSI, al final del `Path` del sistema (`src-tauri/windows/cli-path.wxs`). Al desinstalar
+  se quita solo esa entrada, y reinstalar no la duplica. Las pruebas del script corren en la
+  CI; a mano:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/windows/elision-path.tests.ps1`.
 
 ### "Windows protegió tu PC" — es normal
 

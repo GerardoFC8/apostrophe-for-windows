@@ -20,6 +20,16 @@ ni en los módulos: **todas** viven en el catálogo de `src/i18n.ts`.
 
 Al escribir en español dentro del catálogo, sigue las reglas de castellano neutro de abajo.
 
+### CLI `elision` — inglés y códigos estables
+
+El catálogo `src/i18n.ts` rige **solo la GUI**. La CLI (`crates/apostrophe-cli`, binario
+`elision`) escribe sus mensajes en **inglés** y no usa el catálogo. Su contrato con los
+agentes son los códigos de salida (0–5) y los códigos de error (`usage`, `sidecar_missing`,
+`dictionary_missing`, `conversion_failed`, `io_error`), no el texto: cambiar un mensaje es
+libre; cambiar o quitar un código rompe a quien lo usa. La CLI arma sus mensajes desde las
+variantes de `ExportError` y `DictionaryError`; no reutilices su `Display` en español, que es
+de la GUI.
+
 ### Todo lo demás — castellano neutro (OBLIGATORIO)
 
 Respuestas del asistente, comentarios del código, mensajes de commit y documentación en
@@ -55,7 +65,9 @@ la misma frase en título y cuerpo la muestra dos o tres veces.
   atribución de IA ni `Co-Authored-By`.
 - **Arquitectura hexagonal** (ADR-0001): la lógica de dominio vive en
   `crates/apostrophe-core` (puro, sin Tauri); `src-tauri` es solo el adaptador (IPC,
-  diálogos, procesos). El frontend (`src/`) solo PRESENTA.
+  diálogos, procesos). El frontend (`src/`) solo PRESENTA. La CLI (`crates/apostrophe-cli`
+  + shim `src-tauri/src/bin/elision.rs`) es un segundo adaptador primario, y
+  `crates/apostrophe-sidecars` el adaptador secundario que comparten (ADR-0002).
 - **Verificar antes de afirmar.** Las APIs de Tauri 2 y el comportamiento de las
   dependencias se confirman contra docs o el código fuente instalado, no de memoria.
 - **Diálogos nativos**: siempre con el patrón `async` + `spawn_blocking` (evita el
@@ -66,6 +78,9 @@ la misma frase en título y cuerpo la muestra dos o tres veces.
 - Dominio (corre en WSL): `cargo test -p apostrophe-core`.
 - Workspace completo: `cargo test`, `cargo clippy`.
 - Frontend: `pnpm exec tsc --noEmit`.
+- Script del Path del instalador NSIS (Windows PowerShell 5.1, clave temporal de HKCU):
+  `powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/windows/elision-path.tests.ps1`.
+  La integración real con NSIS y MSI (Path al instalar, reinstalar y desinstalar) es manual.
 - App completa (instalador, asociación de archivos, diálogos nativos de Windows):
   se valida en **Windows real** con `pnpm tauri build` / `pnpm tauri dev`. En WSL los
   diálogos usan el backend GTK y se ven distintos (es solo el entorno de desarrollo).

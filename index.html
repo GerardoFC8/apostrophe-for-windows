@@ -131,8 +131,20 @@
         </button>
       </div>
     </header>
-    <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo cambia en disco
-         mientras hay cambios locales sin guardar. NO modal: el editor sigue activo. -->
+    <!-- Pestañas: una por documento abierto. Las construye tab-bar.ts a partir de la
+         colección de tabs.ts (role=tablist/tab, aria-selected, flechas para moverse, Supr y
+         clic central para cerrar). Scroll horizontal cuando no entran. -->
+    <div class="tab-bar" id="tab-bar">
+      <div id="tab-list" class="tab-list" role="tablist" data-i18n-aria-label="tabs.listLabel"></div>
+      <button class="tab-new" id="new-tab-btn" type="button" data-i18n-aria-label="tabs.new" data-i18n-title="tabs.newHint">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+    <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo de la pestaña
+         ACTIVA cambia en disco mientras tiene cambios locales sin guardar (una pestaña en
+         segundo plano lo muestra al activarse). NO modal: el editor sigue activo. -->
     <div id="external-change-bar" class="external-change-bar" hidden>
       <span class="external-change-msg" data-i18n="external.message"></span>
       <div class="external-change-actions">
@@ -141,7 +153,7 @@
       </div>
     </div>
     <main class="split">
-      <div id="editor" class="editor"></div>
+      <div id="editor" class="editor" role="tabpanel"></div>
       <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
            acceder a window.parent.__TAURI__ (cierra XSS via .md malicioso). allow-scripts
            deja correr MathJax. -->
@@ -161,7 +173,7 @@
     <!-- M11: overlay modal de atajos de teclado. Backdrop a pantalla completa + panel
          centrado. Se abre con Ctrl+? o desde el menú; se cierra con Esc, con clic en el
          backdrop o con el botón ×. Las teclas usan <kbd>. La lista está agrupada por
-         secciones; cada atajo verificado contra los handlers de main.ts. -->
+         secciones; cada atajo verificado contra los handlers de shortcuts.ts y editor.ts. -->
     <div id="shortcuts-overlay" class="overlay" hidden>
       <div class="overlay-backdrop"></div>
       <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
@@ -182,6 +194,15 @@
               <dt data-i18n="shortcuts.saveAs"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dd>
               <dt data-i18n="shortcuts.newDoc"></dt><dd><kbd>Ctrl</kbd>+<kbd>N</kbd></dd>
               <dt data-i18n="shortcuts.export"></dt><dd><kbd>Ctrl</kbd>+<kbd>E</kbd></dd>
+            </dl>
+          </section>
+          <section class="shortcuts-section">
+            <h3 class="shortcuts-heading" data-i18n="shortcuts.tabs"></h3>
+            <dl class="shortcuts-list">
+              <dt data-i18n="shortcuts.newTab"></dt><dd><kbd>Ctrl</kbd>+<kbd>T</kbd></dd>
+              <dt data-i18n="shortcuts.closeTab"></dt><dd><kbd>Ctrl</kbd>+<kbd>W</kbd></dd>
+              <dt data-i18n="shortcuts.nextTab"></dt><dd><kbd>Ctrl</kbd>+<kbd>Tab</kbd></dd>
+              <dt data-i18n="shortcuts.prevTab"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">
@@ -210,7 +231,7 @@
             <h3 class="shortcuts-heading" data-i18n="shortcuts.writingModes"></h3>
             <dl class="shortcuts-list">
               <dt data-i18n="shortcuts.focus"></dt><dd><kbd>Ctrl</kbd>+<kbd>D</kbd></dd>
-              <dt data-i18n="shortcuts.hemingway"></dt><dd><kbd>Ctrl</kbd>+<kbd>T</kbd></dd>
+              <dt data-i18n="shortcuts.hemingway"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></dd>
             </dl>
           </section>
           <section class="shortcuts-section">

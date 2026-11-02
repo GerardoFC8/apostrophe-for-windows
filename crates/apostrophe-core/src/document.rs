@@ -127,7 +127,11 @@ mod tests {
         assert!(doc.is_dirty());
         doc.mark_clean();
         assert!(!doc.is_dirty(), "guardar limpia el dirty");
-        assert_eq!(doc.path(), Some(&PathBuf::from("/tmp/a.md")), "el path se mantiene");
+        assert_eq!(
+            doc.path(),
+            Some(&PathBuf::from("/tmp/a.md")),
+            "el path se mantiene"
+        );
     }
 
     #[test]

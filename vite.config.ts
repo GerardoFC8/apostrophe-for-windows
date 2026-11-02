@@ -35,7 +35,10 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // El workspace de cargo deja `target/` en la raíz: si Vite lo vigila, en Windows
+      // choca con la .dll que cargo está escribiendo (EBUSY) y se cae. `crates/` es Rust
+      // puro; tampoco tiene nada que recargar.
+      ignored: ["**/src-tauri/**", "**/target/**", "**/crates/**"],
     },
   },
 }));
