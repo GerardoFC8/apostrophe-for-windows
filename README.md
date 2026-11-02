@@ -198,29 +198,6 @@ elision export docs\capitulo.md -o C:\salida\capitulo.pdf --json
 En desarrollo, sin instalar: `cargo run -p apostrophe --bin elision -- --help`. La
 arquitectura está en [`docs/adr/0002-cli-adaptador-primario.md`](docs/adr/0002-cli-adaptador-primario.md).
 
-## Instalación
-
-La forma más sencilla es con [winget](https://learn.microsoft.com/windows/package-manager/winget/),
-el gestor de paquetes que ya viene en Windows 10 y 11. Desde PowerShell o la terminal:
-
-```powershell
-winget install GerardoFC8.ApostropheForWindows
-```
-
-No pide permisos de administrador: la app se instala solo para tu usuario.
-
-Para actualizar o desinstalar:
-
-```powershell
-winget upgrade GerardoFC8.ApostropheForWindows
-winget uninstall GerardoFC8.ApostropheForWindows
-```
-
-> La versión de winget puede tardar unos días en alcanzar a la última release. Si
-> quieres la más reciente, descarga `Apostrophe_<versión>_x64-setup.exe` desde
-> [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) y ejecútalo
-> (ver ["Windows protegió tu PC"](#windows-protegió-tu-pc--es-normal)).
-
 ## Requisitos de desarrollo
 
 - [Rust](https://rustup.rs/) (toolchain MSVC en Windows: `x86_64-pc-windows-msvc`).
