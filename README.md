@@ -96,6 +96,11 @@ y scripts. Usa los mismos pandoc, typst y diccionario que la app, nunca pide con
 su salida es estable. El contrato son los **códigos de salida y de error**; los mensajes van
 en inglés y solo sirven de diagnóstico.
 
+> **¿Por qué `elision`?** Una *elisión* es la omisión de un sonido o una letra al unir dos
+> palabras (*do not* → *don't*, *le arbre* → *l'arbre*), y en la escritura se marca con un
+> **apóstrofo**. Es decir, el signo que da nombre a Apostrophe existe para marcar una elisión.
+> La CLI es además el editor sin su interfaz: lo que queda al recortarlo.
+
 > Después de instalar, **cierra por completo** Windows Terminal, VS Code o el programa desde
 > el que abres la terminal, y vuelve a abrirlo. Una pestaña nueva no basta: hereda el PATH
 > que tenía ese programa al arrancar, así que ni ella ni los agentes que corran en ella

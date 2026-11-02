@@ -99,6 +99,11 @@ scripts. It uses the same pandoc, typst and dictionary as the app, never asks fo
 confirmation, and its output is stable. The contract is the **exit codes and error codes**;
 messages are in English and are only diagnostics.
 
+> **Why `elision`?** An *elision* is the omission of a sound or letter when two words are
+> joined (*do not* → *don't*, *le arbre* → *l'arbre*), and in writing it is marked with an
+> **apostrophe**. In other words, the mark Apostrophe is named after exists to signal an
+> elision. The CLI is also the editor without its interface: what is left once it is cut down.
+
 > After installing, **fully close** Windows Terminal, VS Code or whatever program you open
 > your terminal from, and start it again. A new tab is not enough: it inherits the PATH that
 > program had when it started, so neither the tab nor the agents running in it will find
