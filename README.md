@@ -1,10 +1,11 @@
 **Español** | [English](./README.en.md)
 
-# Apostrophe para Windows
+# Elision
 
-Editor de Markdown nativo, minimalista y libre de distracciones para Windows.
-Port nativo del editor [Apostrophe](https://gitlab.gnome.org/World/apostrophe) de
-GNOME, construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal
+Editor de Markdown nativo, minimalista y libre de distracciones para Windows (antes
+*Apostrophe para Windows*). Port nativo del editor
+[Apostrophe](https://gitlab.gnome.org/World/apostrophe) de GNOME, construido con
+**Tauri 2 + Rust** bajo una arquitectura hexagonal
 (ver [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
 
 ## Características
@@ -85,7 +86,7 @@ winget uninstall GerardoFC8.ApostropheForWindows
 ```
 
 > La versión de winget puede tardar unos días en alcanzar a la última release. Si
-> quieres la más reciente, descarga `Apostrophe_<versión>_x64-setup.exe` desde
+> quieres la más reciente, descarga `Elision_<versión>_x64-setup.exe` desde
 > [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) y ejecútalo
 > (ver ["Windows protegió tu PC"](#windows-protegió-tu-pc--es-normal)).
 
@@ -95,6 +96,12 @@ El instalador también deja en el PATH el comando **`elision`**: una CLI para ag
 y scripts. Usa los mismos pandoc, typst y diccionario que la app, nunca pide confirmación y
 su salida es estable. El contrato son los **códigos de salida y de error**; los mensajes van
 en inglés y solo sirven de diagnóstico.
+
+> **¿Por qué `elision`?** Una *elisión* es la omisión de un sonido o una letra al unir dos
+> palabras (*do not* → *don't*, *le arbre* → *l'arbre*), y en la escritura se marca con un
+> **apóstrofo**. Es decir, el signo que da nombre al Apostrophe original existe para marcar
+> una elisión. De ahí el nombre de la app, y la CLI es además el editor sin su interfaz: lo
+> que queda al recortarlo.
 
 > Después de instalar, **cierra por completo** Windows Terminal, VS Code o el programa desde
 > el que abres la terminal, y vuelve a abrirlo. Una pestaña nueva no basta: hereda el PATH
@@ -238,8 +245,8 @@ pnpm tauri dev
    `src-tauri/`):
 
    ```
-   target/release/bundle/nsis/Apostrophe_<versión>_x64-setup.exe   # NSIS
-   target/release/bundle/msi/Apostrophe_<versión>_x64_en-US.msi     # MSI (WiX)
+   target/release/bundle/nsis/Elision_<versión>_x64-setup.exe   # NSIS
+   target/release/bundle/msi/Elision_<versión>_x64_en-US.msi     # MSI (WiX)
    ```
 
 ### Configuración del instalador

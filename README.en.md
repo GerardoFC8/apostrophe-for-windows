@@ -1,9 +1,10 @@
 [Español](./README.md) | **English**
 
-# Apostrophe for Windows
+# Elision
 
-A native, minimal, distraction-free Markdown editor for Windows.
-A native port of GNOME's [Apostrophe](https://gitlab.gnome.org/World/apostrophe), built
+A native, minimal, distraction-free Markdown editor for Windows (formerly
+*Apostrophe for Windows*). A native port of GNOME's
+[Apostrophe](https://gitlab.gnome.org/World/apostrophe), built
 with **Tauri 2 + Rust** on a hexagonal architecture
 (see [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
 
@@ -88,7 +89,7 @@ winget uninstall GerardoFC8.ApostropheForWindows
 ```
 
 > The winget version may take a few days to catch up with the latest release. For the
-> newest one, download `Apostrophe_<version>_x64-setup.exe` from
+> newest one, download `Elision_<version>_x64-setup.exe` from
 > [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) and run it
 > (see ["Windows protected your PC"](#windows-protected-your-pc--this-is-normal)).
 
@@ -98,6 +99,12 @@ The installer also puts the **`elision`** command on the PATH: a CLI for AI agen
 scripts. It uses the same pandoc, typst and dictionary as the app, never asks for
 confirmation, and its output is stable. The contract is the **exit codes and error codes**;
 messages are in English and are only diagnostics.
+
+> **Why `elision`?** An *elision* is the omission of a sound or letter when two words are
+> joined (*do not* → *don't*, *le arbre* → *l'arbre*), and in writing it is marked with an
+> **apostrophe**. In other words, the mark the original Apostrophe is named after exists to
+> signal an elision. Hence the app's name; the CLI is also the editor without its interface:
+> what is left once it is cut down.
 
 > After installing, **fully close** Windows Terminal, VS Code or whatever program you open
 > your terminal from, and start it again. A new tab is not enough: it inherits the PATH that
@@ -242,8 +249,8 @@ pnpm tauri dev
    `src-tauri/`):
 
    ```
-   target/release/bundle/nsis/Apostrophe_<version>_x64-setup.exe   # NSIS
-   target/release/bundle/msi/Apostrophe_<version>_x64_en-US.msi     # MSI (WiX)
+   target/release/bundle/nsis/Elision_<version>_x64-setup.exe   # NSIS
+   target/release/bundle/msi/Elision_<version>_x64_en-US.msi     # MSI (WiX)
    ```
 
 ### Installer configuration
