@@ -1073,11 +1073,13 @@ async fn save_document(
     session: tauri::State<'_, SnapshotSession>,
 ) -> Result<Option<DocStatus>, String> {
     let target = target_doc(&docs, doc_id)?;
-    let existing = {
-        docs.lock()
-            .unwrap()
-            .get(target)
-            .and_then(|d| d.path().cloned())
+    let (existing, line_ending) = {
+        let ws = docs.lock().unwrap();
+        let store = ws.get(target);
+        (
+            store.and_then(|d| d.path().cloned()),
+            store.map(|d| d.line_ending()).unwrap_or_default(),
+        )
     };
     let Some(path) = existing else {
         return save_document_as(app, text, Some(target), docs, session).await;
@@ -1088,7 +1090,9 @@ async fn save_document(
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
     // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
     // el resto de la sesion.
-    let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
+    // El editor entrega `\n`; el archivo se escribe con el salto que tenia al abrirse.
+    let write_result = std::fs::write(&path, line_ending.apply(&text))
+        .map_err(|e| format!("no se pudo guardar: {e}"));
     // M8.4b: re-armar el watcher sobre el mismo path siempre, incluso si fallo el write.
     rewatch_doc(&app, &docs, target);
     // Ahora si: propagar el error si lo hay.
@@ -1142,13 +1146,18 @@ async fn save_document_as(
     );
     // Antes de escribir y de tocar recientes: si el documento se cerro durante el dialogo
     // o la ruta la tiene otra pestaña, no se escribe nada.
-    check_save_target(&docs.lock().unwrap(), target, &path)?;
+    let line_ending = {
+        let ws = docs.lock().unwrap();
+        check_save_target(&ws, target, &path)?;
+        ws.get(target).map(|d| d.line_ending()).unwrap_or_default()
+    };
     // M8.4b: suspender el watcher antes de escribir (la ruta aun puede ser la antigua).
     suppress_watcher(&app, target);
     // Capturar el error del write para re-armar el watcher SIEMPRE (exito o falla)
     // antes de propagar: si el write falla y no re-armamos, el watcher queda en None
-    // el resto de la sesion.
-    let write_result = std::fs::write(&path, &text).map_err(|e| format!("no se pudo guardar: {e}"));
+    // el resto de la sesion. Guardar como conserva el salto de linea del documento.
+    let write_result = std::fs::write(&path, line_ending.apply(&text))
+        .map_err(|e| format!("no se pudo guardar: {e}"));
     if write_result.is_err() {
         // Camino de error: re-armar sobre la ruta anterior (saved_as no se llamo, el
         // documento aun tiene el path anterior).
