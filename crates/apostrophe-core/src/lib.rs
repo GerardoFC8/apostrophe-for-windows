@@ -16,6 +16,7 @@ pub mod document;
 pub mod encoding;
 pub mod image;
 pub mod inline;
+pub mod link;
 pub mod markup;
 pub mod math;
 pub mod recents;
