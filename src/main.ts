@@ -11,12 +11,13 @@ import {
   initDocumentSession,
   initExternalChangeWatcher,
   initDocumentEvents,
+  openPath,
   restoreInitialDocument,
   syncDoc,
 } from "./document-session";
 import { activeDocId } from "./tabs";
 import { initTabBar } from "./tab-bar";
-import { initPreviewWindow, initViewMode, render } from "./preview";
+import { initPreviewLinks, initPreviewWindow, initViewMode, render } from "./preview";
 import { updateStats } from "./stats";
 import { applyTheme, buildThemeMenu, getInitialTheme, initThemeMenu } from "./theme";
 import { alignTableAtCursor, initExportButton } from "./commands";
@@ -82,6 +83,7 @@ document.querySelector("#win-close")?.addEventListener("click", () => void appWi
 initCloseGuard(); // M8.1: guard anti-perdida al cerrar la ventana (una confirmacion para todas)
 initFileShortcuts(); // M4/M5: Ctrl+O/S/Shift+S/E/N
 initPreviewWindow(); // M18: ventana de vista previa desacoplada
+initPreviewLinks(openPath); // enlaces del preview: web, otros .md en pestañas, archivos en el Explorador
 initThemeMenu(); // M5: selector de tema
 initExportButton(); // M12
 

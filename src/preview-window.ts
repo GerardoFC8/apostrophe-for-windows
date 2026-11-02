@@ -7,6 +7,7 @@
 // un solo lado.
 
 import { listen, emit } from "@tauri-apps/api/event";
+import { linkFromMessage } from "./preview-link";
 
 const frame = document.querySelector<HTMLIFrameElement>("#frame")!;
 
@@ -18,3 +19,10 @@ void listen<string>("preview-html", (event) => {
 // Al abrir, la ventana principal puede llevar rato sin renderizar: se le pide el HTML
 // actual para no quedarse en blanco hasta la próxima tecla.
 void emit("preview-window-ready");
+
+// Los enlaces del HTML no se siguen aquí: el iframe pasa el href y se reenvía a la ventana
+// principal, que conoce el documento activo y sus pestañas (ver initPreviewLinks).
+window.addEventListener("message", (e) => {
+  const href = linkFromMessage(e, frame);
+  if (href !== null) void emit("preview-link", href);
+});

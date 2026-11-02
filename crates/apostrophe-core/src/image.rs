@@ -287,18 +287,18 @@ fn find_src_value(tag: &str) -> Option<(usize, usize)> {
 /// No se usa `Path::is_absolute` porque depende de la plataforma que COMPILA: en WSL, donde
 /// corren las pruebas, `C:\fotos\a.png` seria "relativa" y se resolveria contra el documento.
 /// La app es de Windows; la respuesta tiene que ser la misma en los dos lados.
-fn is_absolute(path: &str) -> bool {
+pub(crate) fn is_absolute(path: &str) -> bool {
     path.starts_with('/') || path.starts_with('\\') || is_windows_drive(path)
 }
 
 /// Forma `X:/` o `X:\` del comienzo de una ruta de Windows.
-fn is_windows_drive(path: &str) -> bool {
+pub(crate) fn is_windows_drive(path: &str) -> bool {
     let b = path.as_bytes();
     b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
 }
 
 /// `true` si la cadena arranca con un esquema de URL (`http:`, `https:`, `data:`…).
-fn has_scheme(url: &str) -> bool {
+pub(crate) fn has_scheme(url: &str) -> bool {
     let Some(colon) = url.find(':') else {
         return false;
     };
@@ -314,7 +314,7 @@ fn has_scheme(url: &str) -> bool {
 /// deshacerlo se buscaria un archivo que no existe.
 ///
 /// Un `%` suelto o mal formado se deja tal cual: en Windows es un caracter valido de nombre.
-fn percent_decode(url: &str) -> String {
+pub(crate) fn percent_decode(url: &str) -> String {
     let bytes = url.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -335,7 +335,7 @@ fn percent_decode(url: &str) -> String {
 }
 
 /// Extension del ultimo componente de la ruta, sin el punto.
-fn extension_of(path: &str) -> Option<&str> {
+pub(crate) fn extension_of(path: &str) -> Option<&str> {
     let name = path.rsplit(['/', '\\']).next()?;
     let dot = name.rfind('.')?;
     if dot == 0 {

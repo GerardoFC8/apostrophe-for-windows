@@ -114,6 +114,10 @@ export interface Messages {
   "status.closeFailed": string;
   "status.dirtyCheckFailed": string;
   "status.previewFailed": string;
+  "status.linkNoBaseDir": string;
+  "status.linkNotFound": string;
+  "status.linkUnsupported": string;
+  "status.linkFailed": string;
   "error.open": string;
   "error.save": string;
   "error.export": string;
@@ -261,6 +265,10 @@ const ES: Messages = {
   "status.dirtyCheckFailed":
     "no se pudo verificar los cambios — guarda con Ctrl+S antes de cerrar",
   "status.previewFailed": "error de preview",
+  "status.linkNoBaseDir": "guarda el documento para seguir enlaces relativos",
+  "status.linkNotFound": "el enlace apunta a un archivo que no existe",
+  "status.linkUnsupported": "este enlace no se puede abrir",
+  "status.linkFailed": "no se pudo abrir el enlace",
   "status.tableAligned": "tabla alineada",
   "status.notATable": "el cursor no está sobre una tabla",
   "error.open": "error al abrir",
@@ -410,6 +418,10 @@ const EN: Messages = {
   "status.dirtyCheckFailed":
     "could not check for changes — save with Ctrl+S before closing",
   "status.previewFailed": "preview error",
+  "status.linkNoBaseDir": "save the document to follow relative links",
+  "status.linkNotFound": "the link points to a file that does not exist",
+  "status.linkUnsupported": "this link cannot be opened",
+  "status.linkFailed": "could not open the link",
   "status.tableAligned": "table aligned",
   "status.notATable": "the cursor is not on a table",
   "error.open": "error opening the file",

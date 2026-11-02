@@ -323,6 +323,66 @@ async fn render_image(
         .map_err(|_| "unreadable".to_string())?
 }
 
+/// Sigue un enlace del panel de vista previa. A donde lleva cada `href` lo decide el dominio
+/// (`apostrophe_core::link`); aca solo se ejecuta.
+///
+/// Devuelve la ruta cuando el enlace apunta a otro Markdown: abrirlo en una pestaña es tarea
+/// del frontend (`openPath`), que es quien maneja las pestañas. El resto lo resuelve el
+/// sistema: la web y el correo, su programa; una carpeta, el Explorador. Cualquier otro
+/// archivo se MUESTRA en el Explorador en vez de abrirse con su programa: el HTML del
+/// preview puede traer scripts del propio Markdown, y abrir por ese camino un `.exe` o un
+/// `.bat` lo ejecutaria sin preguntar.
+///
+/// El error es un CODIGO estable (`no-base-dir`, `not-found`, `unsupported`, `failed`): la
+/// copia visible vive en el catalogo de i18n del frontend.
+#[tauri::command]
+async fn open_preview_link(
+    app: tauri::AppHandle,
+    docs: tauri::State<'_, Docs>,
+    href: String,
+    doc_id: Option<DocId>,
+) -> Result<Option<String>, String> {
+    use apostrophe_core::link::{resolve_link, LinkTarget};
+    use tauri_plugin_opener::OpenerExt;
+
+    // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
+    let doc_dir = target_doc_dir(&docs, doc_id);
+    let target = resolve_link(&href, doc_dir.as_deref());
+    // Lanzar procesos y hablar con el Explorador es bloqueante: va fuera del hilo de eventos.
+    tauri::async_runtime::spawn_blocking(move || {
+        let opener = app.opener();
+        let failed = |_| "failed".to_string();
+        match target {
+            LinkTarget::Web(url) => opener
+                .open_url(url, None::<&str>)
+                .map(|()| None)
+                .map_err(failed),
+            LinkTarget::Markdown(path) => {
+                let path = absolute_doc_path(path);
+                if !path.is_file() {
+                    return Err("not-found".to_string());
+                }
+                Ok(Some(path.to_string_lossy().into_owned()))
+            }
+            LinkTarget::Local(path) => {
+                let path = absolute_doc_path(path);
+                let shown = if path.is_dir() {
+                    opener.open_path(path.to_string_lossy(), None::<&str>)
+                } else if path.exists() {
+                    opener.reveal_item_in_dir(&path)
+                } else {
+                    return Err("not-found".to_string());
+                };
+                shown.map(|()| None).map_err(failed)
+            }
+            LinkTarget::NoBaseDir => Err("no-base-dir".to_string()),
+            LinkTarget::Unsupported => Err("unsupported".to_string()),
+        }
+    })
+    .await
+    .map_err(|_| "failed".to_string())?
+}
+
 /// Elige una imagen con el selector nativo y devuelve el fragmento `![](ruta)` listo para
 /// insertar. `None` si el usuario cancela.
 ///
@@ -1787,6 +1847,7 @@ pub fn run() {
             inline_target,
             render_math,
             render_image,
+            open_preview_link,
             pick_image,
             count_stats,
             set_content,

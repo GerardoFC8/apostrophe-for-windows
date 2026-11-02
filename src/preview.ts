@@ -6,6 +6,7 @@ import { view, getText } from "./editor";
 import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
 import { t } from "./i18n";
+import { LINK_SCRIPT, linkFromMessage } from "./preview-link";
 
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 
@@ -56,12 +57,39 @@ export function exportTheme(): { css: string; accent: string } {
   return theme;
 }
 
-// Inyecta el <style> del tema en el HTML standalone de pandoc (inline -> anda en el
-// iframe srcdoc sandboxeado).
+// Inyecta el <style> del tema y el script de enlaces en el HTML standalone de pandoc (inline
+// -> anda en el iframe srcdoc sandboxeado).
 function withTheme(html: string): string {
-  return html.includes("</head>")
-    ? html.replace("</head>", `${previewStyle()}</head>`)
-    : previewStyle() + html;
+  const head = previewStyle() + LINK_SCRIPT;
+  return html.includes("</head>") ? html.replace("</head>", `${head}</head>`) : head + html;
+}
+
+const LINK_ERRORS: Record<string, () => string> = {
+  "no-base-dir": () => t("status.linkNoBaseDir"),
+  "not-found": () => t("status.linkNotFound"),
+  unsupported: () => t("status.linkUnsupported"),
+};
+
+// Sigue un enlace del preview. A donde lleva lo decide el backend; aca solo se abre la
+// pestaña cuando apunta a otro Markdown y se avisa si no se pudo.
+async function followLink(href: string, openMarkdown: (path: string) => Promise<void>): Promise<void> {
+  try {
+    const path = await invoke<string | null>("open_preview_link", { href, docId: activeDocId() });
+    if (path) await openMarkdown(path);
+  } catch (err) {
+    flashStatus((LINK_ERRORS[String(err)] ?? (() => t("status.linkFailed")))(), 4000);
+  }
+}
+
+// Cablea los enlaces del panel y los de la ventana desacoplada, que no sigue nada por su
+// cuenta: reenvia el href y se resuelve aca, con el documento activo como base. `openMarkdown`
+// se inyecta desde el arranque para que este modulo no dependa de document-session.ts.
+export function initPreviewLinks(openMarkdown: (path: string) => Promise<void>): void {
+  window.addEventListener("message", (e) => {
+    const href = linkFromMessage(e, preview);
+    if (href !== null) void followLink(href, openMarkdown);
+  });
+  void listen<string>("preview-link", (event) => void followLink(event.payload, openMarkdown));
 }
 
 // Re-tematizar el preview ya renderizado (editor/chrome se actualizan solos via vars).
