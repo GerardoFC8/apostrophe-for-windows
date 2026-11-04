@@ -1,6 +1,10 @@
 # Publica un release al empujar un tag `vX.Y.Z`. Compila los instaladores en
 # windows-latest (WiX solo corre en Windows) y los adjunta al release.
 #
+# Un tag con sufijo (`v0.5.0-beta.1`) es una PRE-RELEASE: sale marcada como tal en GitHub
+# y solo con el instalador NSIS. El MSI no admite esas versiones (Windows Installer exige
+# numeros, y tauri-bundler rechaza un `-beta.1`); las betas no se distribuyen por directiva.
+#
 # Las notas se toman de `docs/release-notes/<tag>.md` si existe; si no, se generan a partir
 # de los commits. Publicar es un paso MANUAL a propósito: el workflow crea el release como
 # BORRADOR para poder revisar los instaladores antes de que queden a la vista de todos.
@@ -78,7 +82,12 @@ jobs:
           ELISION_REQUIRE_SIDECARS: "1"
 
       - name: Compilar instaladores
+        if: ${{ !contains(github.ref_name, '-') }}
         run: pnpm tauri build
+
+      - name: Compilar el instalador de la pre-release (solo NSIS)
+        if: ${{ contains(github.ref_name, '-') }}
+        run: pnpm tauri build --bundles nsis
 
       - name: Crear el release en borrador
         shell: pwsh
@@ -93,6 +102,10 @@ jobs:
           )
           if (Test-Path $notes) { $args += @("--notes-file", $notes) }
           else { $args += "--generate-notes" }
+          if ("${{ github.ref_name }}".Contains("-")) { $args += "--prerelease" }
           $args += (Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName
-          $args += (Get-ChildItem target/release/bundle/msi/*.msi).FullName
+          # Las pre-releases no traen MSI (ver arriba).
+          if (Test-Path target/release/bundle/msi) {
+            $args += (Get-ChildItem target/release/bundle/msi/*.msi).FullName
+          }
           gh @args
