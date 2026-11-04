@@ -17,10 +17,18 @@ import {
 } from "./document-session";
 import { activeDocId } from "./tabs";
 import { initTabBar } from "./tab-bar";
-import { initPreviewLinks, initPreviewWindow, initViewMode, render } from "./preview";
+import {
+  initPreviewLinks,
+  initPreviewWindow,
+  initViewMode,
+  refreshPreviewTheme,
+  render,
+} from "./preview";
+import { initFileDrop } from "./file-drop";
+import { initZoom } from "./zoom";
 import { updateStats } from "./stats";
 import { applyTheme, buildThemeMenu, getInitialTheme, initThemeMenu } from "./theme";
-import { alignTableAtCursor, initExportButton } from "./commands";
+import { alignTableAtCursor, initExportButton, pasteImage } from "./commands";
 import { initMenu } from "./menu";
 import { initLanguage } from "./language";
 import {
@@ -84,6 +92,8 @@ initCloseGuard(); // M8.1: guard anti-perdida al cerrar la ventana (una confirma
 initFileShortcuts(); // M4/M5: Ctrl+O/S/Shift+S/E/N
 initPreviewWindow(); // M18: ventana de vista previa desacoplada
 initPreviewLinks(openPath); // enlaces del preview: web, otros .md en pestañas, archivos en el Explorador
+initFileDrop(openPath); // soltar archivos: .md en pestañas, imágenes en el texto
+void initZoom(refreshPreviewTheme); // Ctrl + / Ctrl - / Ctrl 0 y Ctrl + rueda
 initThemeMenu(); // M5: selector de tema
 initExportButton(); // M12
 
@@ -101,6 +111,7 @@ createEditor({
   onDocChanged: scheduleUpdate,
   onAlignTable: alignTableAtCursor,
   currentDocId: activeDocId,
+  onPasteImage: (image) => void pasteImage(image),
 });
 initDocumentSession({ onActiveDocChanged: refreshActiveDocument });
 initTabBar(); // barra de pestañas (se repinta sola con cada cambio de la coleccion)

@@ -33,9 +33,15 @@ function markdownStylesheet(v: (name: string) => string): string {
   </style>`;
 }
 
+// El zoom del texto (zoom.ts) solo va en la vista previa: lo que se exporta sale siempre a
+// tamaño normal.
 function previewStyle(): string {
   const cs = getComputedStyle(document.documentElement);
-  return markdownStylesheet((name) => cs.getPropertyValue(name).trim());
+  const zoom = cs.getPropertyValue("--text-zoom").trim() || "1";
+  return (
+    markdownStylesheet((name) => cs.getPropertyValue(name).trim()) +
+    `<style>body{font-size:calc(100% * ${zoom});}</style>`
+  );
 }
 
 // Tema para EXPORTAR: siempre la paleta CLARA, sin importar el tema activo. Un HTML o un

@@ -11,6 +11,8 @@ import type { DecorationSet } from "@codemirror/view";
 import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import type { Extension } from "@codemirror/state";
 import { invoke } from "@tauri-apps/api/core";
+import { flashStatus } from "./status";
+import { t } from "./i18n";
 
 export interface Misspelling {
   word: string;
@@ -92,6 +94,37 @@ function spanAt(view: EditorView, pos: number): Misspelling | undefined {
   return view.state.field(spellField).find((s) => pos >= s.from && pos <= s.to);
 }
 
+// Boton del menu. mousedown + preventDefault: no perder el foco/seleccion del editor antes
+// de actuar.
+function menuItem(label: string, onPick: () => void, extraClass = ""): HTMLButtonElement {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `spell-item ${extraClass}`.trim();
+  item.textContent = label;
+  item.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    closeSpellMenu();
+    onPick();
+  });
+  return item;
+}
+
+// Agrega la palabra al diccionario personal y quita en el momento las ondulitas de TODAS
+// sus apariciones (sin distinguir mayusculas, igual que el diccionario), sin esperar al
+// proximo chequeo.
+async function addToDictionary(view: EditorView, word: string): Promise<void> {
+  try {
+    await invoke("add_to_dictionary", { word });
+    const key = word.toLowerCase();
+    const remaining = view.state.field(spellField).filter((s) => s.word.toLowerCase() !== key);
+    view.dispatch({ effects: setSpellSpans.of(remaining) });
+    flashStatus(t("status.wordAdded", { word }));
+  } catch (err) {
+    flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
+  }
+  view.focus();
+}
+
 function showSpellMenu(view: EditorView, span: Misspelling, x: number, y: number): void {
   closeSpellMenu();
   const menu = document.createElement("div");
@@ -99,19 +132,21 @@ function showSpellMenu(view: EditorView, span: Misspelling, x: number, y: number
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   for (const suggestion of span.suggestions) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "spell-item";
-    item.textContent = suggestion;
-    // mousedown + preventDefault: no perder el foco/seleccion del editor antes del dispatch.
-    item.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      view.dispatch({ changes: { from: span.from, to: span.to, insert: suggestion } });
-      closeSpellMenu();
-      view.focus();
-    });
-    menu.appendChild(item);
+    menu.appendChild(
+      menuItem(suggestion, () => {
+        view.dispatch({ changes: { from: span.from, to: span.to, insert: suggestion } });
+        view.focus();
+      }),
+    );
   }
+  if (span.suggestions.length > 0) {
+    const separator = document.createElement("div");
+    separator.className = "spell-separator";
+    menu.appendChild(separator);
+  }
+  menu.appendChild(
+    menuItem(t("spell.addToDictionary"), () => void addToDictionary(view, span.word), "spell-add"),
+  );
   document.body.appendChild(menu);
   // Si el menu se sale del viewport, reposicionar hacia arriba/izquierda (review M6).
   const rect = menu.getBoundingClientRect();
@@ -130,7 +165,7 @@ const spellContextMenu = EditorView.domEventHandlers({
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (pos == null) return false;
     const span = spanAt(view, pos);
-    if (!span || span.suggestions.length === 0) return false; // deja pasar el menu nativo
+    if (!span) return false; // deja pasar el menu nativo
     event.preventDefault();
     showSpellMenu(view, span, event.clientX, event.clientY);
     return true;

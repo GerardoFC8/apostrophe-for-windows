@@ -13,12 +13,14 @@
 
 pub mod convert;
 pub mod document;
+pub mod dropped;
 pub mod encoding;
 pub mod image;
 pub mod inline;
 pub mod link;
 pub mod markup;
 pub mod math;
+pub mod personal_dictionary;
 pub mod recents;
 pub mod snapshot;
 pub mod spellcheck;

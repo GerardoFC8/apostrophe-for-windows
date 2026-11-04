@@ -118,6 +118,15 @@ export interface Messages {
   "status.linkNotFound": string;
   "status.linkUnsupported": string;
   "status.linkFailed": string;
+  "status.pasteImageSaved": string;
+  "status.pasteImageNoBaseDir": string;
+  "status.pasteImageTooLarge": string;
+  "status.pasteImageUnsupported": string;
+  "status.pasteImageFailed": string;
+  "status.dropIgnored": string;
+  "status.wordAdded": string;
+  "status.zoom": string;
+  "spell.addToDictionary": string;
   "error.open": string;
   "error.save": string;
   "error.export": string;
@@ -168,6 +177,9 @@ export interface Messages {
   "shortcuts.redo": string;
   "shortcuts.cycleView": string;
   "shortcuts.fullscreen": string;
+  "shortcuts.zoomIn": string;
+  "shortcuts.zoomOut": string;
+  "shortcuts.zoomReset": string;
   "shortcuts.focus": string;
   "shortcuts.hemingway": string;
   "shortcuts.toggleSpellcheck": string;
@@ -269,6 +281,15 @@ const ES: Messages = {
   "status.linkNotFound": "el enlace apunta a un archivo que no existe",
   "status.linkUnsupported": "este enlace no se puede abrir",
   "status.linkFailed": "no se pudo abrir el enlace",
+  "status.pasteImageSaved": "imagen guardada en la carpeta assets",
+  "status.pasteImageNoBaseDir": "guarda el documento para poder pegar imágenes",
+  "status.pasteImageTooLarge": "la imagen supera los 25 MB",
+  "status.pasteImageUnsupported": "el portapapeles no tiene una imagen PNG, JPEG, GIF, WebP ni SVG",
+  "status.pasteImageFailed": "no se pudo guardar la imagen",
+  "status.dropIgnored": "solo se pueden soltar documentos Markdown e imágenes",
+  "status.wordAdded": "«{word}» agregada al diccionario",
+  "spell.addToDictionary": "Agregar al diccionario",
+  "status.zoom": "zoom {percent} %",
   "status.tableAligned": "tabla alineada",
   "status.notATable": "el cursor no está sobre una tabla",
   "error.open": "error al abrir",
@@ -320,6 +341,9 @@ const ES: Messages = {
   "shortcuts.redo": "Rehacer",
   "shortcuts.cycleView": "Alternar vista (editor / dividido / solo vista)",
   "shortcuts.fullscreen": "Pantalla completa",
+  "shortcuts.zoomIn": "Ampliar el texto (también Ctrl + rueda)",
+  "shortcuts.zoomOut": "Reducir el texto",
+  "shortcuts.zoomReset": "Tamaño normal",
   "shortcuts.focus": "Enfoque",
   "shortcuts.hemingway": "Hemingway",
   "shortcuts.toggleSpellcheck": "Activar o desactivar el corrector",
@@ -422,6 +446,15 @@ const EN: Messages = {
   "status.linkNotFound": "the link points to a file that does not exist",
   "status.linkUnsupported": "this link cannot be opened",
   "status.linkFailed": "could not open the link",
+  "status.pasteImageSaved": "image saved in the assets folder",
+  "status.pasteImageNoBaseDir": "save the document to paste images",
+  "status.pasteImageTooLarge": "the image is larger than 25 MB",
+  "status.pasteImageUnsupported": "the clipboard has no PNG, JPEG, GIF, WebP or SVG image",
+  "status.pasteImageFailed": "could not save the image",
+  "status.dropIgnored": "only Markdown documents and images can be dropped",
+  "status.wordAdded": "“{word}” added to the dictionary",
+  "spell.addToDictionary": "Add to dictionary",
+  "status.zoom": "zoom {percent}%",
   "status.tableAligned": "table aligned",
   "status.notATable": "the cursor is not on a table",
   "error.open": "error opening the file",
@@ -473,6 +506,9 @@ const EN: Messages = {
   "shortcuts.redo": "Redo",
   "shortcuts.cycleView": "Cycle view (editor / split / preview only)",
   "shortcuts.fullscreen": "Full screen",
+  "shortcuts.zoomIn": "Larger text (also Ctrl + wheel)",
+  "shortcuts.zoomOut": "Smaller text",
+  "shortcuts.zoomReset": "Normal size",
   "shortcuts.focus": "Focus",
   "shortcuts.hemingway": "Hemingway",
   "shortcuts.toggleSpellcheck": "Turn the spell checker on or off",

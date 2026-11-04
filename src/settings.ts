@@ -22,11 +22,14 @@ export interface Settings {
   /// la ausencia de eleccion, no el idioma detectado: asi quien nunca toco el selector
   /// acompaña al sistema si algun dia cambia de idioma.
   language: "es" | "en" | null;
+  /// Zoom del texto del editor y la vista previa (1 = 100 %). Ver zoom.ts.
+  zoom: number;
 }
 
 const DEFAULTS: Settings = {
   spellcheck: true,
   language: null,
+  zoom: 1,
 };
 
 // Carga perezosa y memoizada del unico store: se abre una sola vez y se reusa la misma
