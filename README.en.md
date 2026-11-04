@@ -1,5 +1,7 @@
 [Español](./README.md) | **English**
 
+<img src="src-tauri/icons/logo.svg" alt="Elision logo" width="96">
+
 # Elision
 
 A native, minimal, distraction-free Markdown editor for Windows (formerly
