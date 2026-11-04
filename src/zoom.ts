@@ -35,6 +35,13 @@ function zoomBy(steps: number): void {
   apply(zoom + steps * STEP, true);
 }
 
+/// Un paso de zoom: 1 amplía, -1 reduce y 0 vuelve al tamaño normal. Lo usa también la
+/// vista previa, que recibe las teclas cuando tiene el foco.
+export function zoomStep(step: 1 | -1 | 0): void {
+  if (step === 0) apply(1, true);
+  else zoomBy(step);
+}
+
 // Rueda: un "click" del mouse trae deltaY de ~100; un touchpad manda muchos eventos chicos.
 // Se acumula y se da un paso cada 50, para que los dos se sientan parecidos.
 let wheelAccum = 0;
@@ -42,7 +49,13 @@ let wheelAccum = 0;
 function onWheel(e: WheelEvent): void {
   if (!e.ctrlKey) return;
   e.preventDefault();
-  wheelAccum += e.deltaY;
+  zoomWheel(e.deltaY);
+}
+
+/// Ctrl + rueda: acumula el desplazamiento y da un paso cada 50. La vista previa reenvía aquí
+/// el de su propio iframe.
+export function zoomWheel(deltaY: number): void {
+  wheelAccum += deltaY;
   while (Math.abs(wheelAccum) >= 50) {
     const dir = wheelAccum < 0 ? 1 : -1; // rueda hacia arriba (deltaY negativo) = acercar
     zoomBy(dir);
@@ -54,9 +67,9 @@ function onKey(e: KeyboardEvent): void {
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
   // "+" sale con Shift en muchos teclados (o en el teclado numérico); "=" es la misma tecla
   // sin Shift en el teclado de EE. UU. Se aceptan las dos.
-  if (e.key === "+" || e.key === "=") zoomBy(1);
-  else if (e.key === "-") zoomBy(-1);
-  else if (e.key === "0") apply(1, true);
+  if (e.key === "+" || e.key === "=") zoomStep(1);
+  else if (e.key === "-") zoomStep(-1);
+  else if (e.key === "0") zoomStep(0);
   else return;
   e.preventDefault();
   e.stopImmediatePropagation();

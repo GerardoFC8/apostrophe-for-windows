@@ -19,6 +19,10 @@
   --preview-bg: #ffffff;
   --preview-fg: #2e3436;
   --preview-code-bg: rgba(128, 128, 128, 0.12);
+  /* Sin paleta propia de resaltado (ver el tema oscuro). Se anula explicitamente porque las
+     variables se heredan: la sonda de exportacion (tema claro) vive dentro del documento
+     y, con la app en oscuro, heredaria la paleta oscura. */
+  --syntax-keyword: initial;
   --md-marker: rgba(46, 52, 54, 0.45); /* M10: marcadores de markup atenuados */
 }
 
@@ -36,6 +40,18 @@
   --preview-fg: #deddda;
   --preview-code-bg: rgba(255, 255, 255, 0.08);
   --md-marker: rgba(222, 221, 218, 0.45);
+  /* Resaltado de codigo en la vista previa. Los colores de pandoc son para fondo claro (el
+     azul de las funciones casi no se ve sobre gris oscuro): en este tema se reemplazan. Los
+     temas claro y sepia no definen estas variables y se quedan con los de pandoc. */
+  --syntax-keyword: #c678dd;
+  --syntax-type: #e5c07b;
+  --syntax-function: #61afef;
+  --syntax-string: #98c379;
+  --syntax-number: #d19a66;
+  --syntax-comment: #8b929e;
+  --syntax-variable: #e06c75;
+  --syntax-other: #56b6c2;
+  --syntax-error: #ff6b6b;
 }
 
 [data-theme="sepia"] {
@@ -51,6 +67,10 @@
   --preview-bg: #f4ecd8;
   --preview-fg: #5b4636;
   --preview-code-bg: rgba(91, 70, 54, 0.1);
+  /* Sin paleta propia de resaltado (ver el tema oscuro). Se anula explicitamente porque las
+     variables se heredan: la sonda de exportacion (tema claro) vive dentro del documento
+     y, con la app en oscuro, heredaria la paleta oscura. */
+  --syntax-keyword: initial;
   --md-marker: rgba(91, 70, 54, 0.5);
 }
 

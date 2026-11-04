@@ -10,7 +10,7 @@
 
 import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { linkFromMessage } from "./preview-link";
+import { frameMessage } from "./preview-frame";
 import type { PreviewPayload } from "./preview";
 import { LOCALES, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
@@ -94,9 +94,29 @@ void restore();
 // actual para no quedarse en blanco hasta la próxima tecla.
 void emit("preview-window-ready");
 
-// Los enlaces del HTML no se siguen aquí: el iframe pasa el href y se reenvía a la ventana
-// principal, que conoce el documento activo y sus pestañas (ver initPreviewLinks).
+// Lo que pide el iframe (seguir un enlace, cambiar el zoom) no se atiende aquí: se reenvía a
+// la ventana principal, que conoce el documento activo, sus pestañas y el zoom (ver
+// initPreviewFrame).
 window.addEventListener("message", (e) => {
-  const href = linkFromMessage(e, frame);
-  if (href !== null) void emit("preview-link", href);
+  const msg = frameMessage(e, frame);
+  if (msg) void emit("preview-frame", msg);
+});
+
+// Fuera del iframe (sobre los controles) Ctrl + rueda y Ctrl + / - / 0 llegan a esta página:
+// se reenvían igual que los del iframe.
+window.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    void emit("preview-frame", { kind: "wheel", deltaY: e.deltaY });
+  },
+  { passive: false },
+);
+window.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const step = e.key === "+" || e.key === "=" ? 1 : e.key === "-" ? -1 : e.key === "0" ? 0 : null;
+  if (step === null) return;
+  e.preventDefault();
+  void emit("preview-frame", { kind: "zoom", step });
 });

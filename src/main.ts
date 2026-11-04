@@ -18,14 +18,14 @@ import {
 import { activeDocId } from "./tabs";
 import { initTabBar } from "./tab-bar";
 import {
-  initPreviewLinks,
+  initPreviewFrame,
   initPreviewWindow,
   initViewMode,
   refreshPreviewTheme,
   render,
 } from "./preview";
 import { initFileDrop } from "./file-drop";
-import { initZoom } from "./zoom";
+import { initZoom, zoomStep, zoomWheel } from "./zoom";
 import { updateStats } from "./stats";
 import { applyTheme, buildThemeMenu, getInitialTheme, initThemeMenu } from "./theme";
 import { alignTableAtCursor, initExportButton, pasteImage } from "./commands";
@@ -91,7 +91,9 @@ document.querySelector("#win-close")?.addEventListener("click", () => void appWi
 initCloseGuard(); // M8.1: guard anti-perdida al cerrar la ventana (una confirmacion para todas)
 initFileShortcuts(); // M4/M5: Ctrl+O/S/Shift+S/E/N
 initPreviewWindow(); // M18: ventana de vista previa desacoplada
-initPreviewLinks(openPath); // enlaces del preview: web, otros .md en pestañas, archivos en el Explorador
+// Vista previa: enlaces (web, otros .md en pestañas, archivos en el Explorador) y zoom con el
+// foco o el mouse sobre ella.
+initPreviewFrame({ openMarkdown: openPath, zoomStep, zoomWheel });
 initFileDrop(openPath); // soltar archivos: .md en pestañas, imágenes en el texto
 void initZoom(refreshPreviewTheme); // Ctrl + / Ctrl - / Ctrl 0 y Ctrl + rueda
 initThemeMenu(); // M5: selector de tema

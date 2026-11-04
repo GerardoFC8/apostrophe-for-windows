@@ -6,7 +6,8 @@ import { view, getText } from "./editor";
 import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
 import { getLocale, t } from "./i18n";
-import { LINK_SCRIPT, linkFromMessage } from "./preview-link";
+import { FRAME_SCRIPT, frameMessage } from "./preview-frame";
+import type { FrameMessage } from "./preview-frame";
 
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 
@@ -30,7 +31,32 @@ function markdownStylesheet(v: (name: string) => string): string {
     blockquote{border-left:3px solid ${v("--border")};margin-left:0;padding-left:1em;opacity:.85;}
     h1,h2,h3{line-height:1.25;}
     img{max-width:100%;}
-  </style>`;
+  </style>${syntaxStylesheet(v)}`;
+}
+
+// Clases de token del resaltado de pandoc (skylighting), agrupadas por el color que usan.
+const SYNTAX_GROUPS: [string, string[]][] = [
+  ["--syntax-keyword", ["kw", "cf", "im"]],
+  ["--syntax-type", ["dt", "bu", "wa"]],
+  ["--syntax-function", ["fu", "at"]],
+  ["--syntax-string", ["st", "ch", "vs", "ss", "sc", "sp"]],
+  ["--syntax-number", ["dv", "bn", "fl", "cn", "pp"]],
+  ["--syntax-comment", ["co", "do", "an", "cv", "in"]],
+  ["--syntax-variable", ["va", "ex"]],
+  ["--syntax-other", ["ot", "op"]],
+  ["--syntax-error", ["al", "er"]],
+];
+
+// Reemplaza los colores del resaltado de pandoc cuando el tema define los suyos (solo el
+// oscuro). Va después de la hoja de pandoc en el <head>, así que con la misma especificidad
+// gana. Sin las variables (temas claros, exportación) no agrega nada.
+function syntaxStylesheet(v: (name: string) => string): string {
+  if (!v("--syntax-keyword")) return "";
+  const rules = SYNTAX_GROUPS.map(
+    ([variable, classes]) =>
+      `${classes.map((c) => `code span.${c}`).join(",")}{color:${v(variable)};}`,
+  );
+  return `<style>${rules.join("")}code span.co,code span.do{font-style:italic;}</style>`;
 }
 
 // El zoom del texto (zoom.ts) solo va en la vista previa: lo que se exporta sale siempre a
@@ -66,7 +92,7 @@ export function exportTheme(): { css: string; accent: string } {
 // Inyecta el <style> del tema y el script de enlaces en el HTML standalone de pandoc (inline
 // -> anda en el iframe srcdoc sandboxeado).
 function withTheme(html: string): string {
-  const head = previewStyle() + LINK_SCRIPT;
+  const head = previewStyle() + FRAME_SCRIPT;
   return html.includes("</head>") ? html.replace("</head>", `${head}</head>`) : head + html;
 }
 
@@ -87,15 +113,29 @@ async function followLink(href: string, openMarkdown: (path: string) => Promise<
   }
 }
 
-// Cablea los enlaces del panel y los de la ventana desacoplada, que no sigue nada por su
-// cuenta: reenvia el href y se resuelve aca, con el documento activo como base. `openMarkdown`
-// se inyecta desde el arranque para que este modulo no dependa de document-session.ts.
-export function initPreviewLinks(openMarkdown: (path: string) => Promise<void>): void {
+/// Lo que la vista previa necesita del resto de la app. Se inyecta desde el arranque para que
+/// este modulo no dependa de document-session.ts ni de zoom.ts.
+export interface PreviewFrameDeps {
+  openMarkdown: (path: string) => Promise<void>;
+  zoomStep: (step: 1 | -1 | 0) => void;
+  zoomWheel: (deltaY: number) => void;
+}
+
+function handleFrameMessage(msg: FrameMessage, deps: PreviewFrameDeps): void {
+  if (msg.kind === "link") void followLink(msg.href, deps.openMarkdown);
+  else if (msg.kind === "zoom") deps.zoomStep(msg.step);
+  else deps.zoomWheel(msg.deltaY);
+}
+
+// Cablea lo que pide el iframe del panel (ver preview-frame.ts) y lo mismo cuando llega de la
+// ventana desacoplada, que no resuelve nada por su cuenta: reenvia el mensaje y se atiende
+// aca, con el documento activo como base de los enlaces.
+export function initPreviewFrame(deps: PreviewFrameDeps): void {
   window.addEventListener("message", (e) => {
-    const href = linkFromMessage(e, preview);
-    if (href !== null) void followLink(href, openMarkdown);
+    const msg = frameMessage(e, preview);
+    if (msg) handleFrameMessage(msg, deps);
   });
-  void listen<string>("preview-link", (event) => void followLink(event.payload, openMarkdown));
+  void listen<FrameMessage>("preview-frame", (event) => handleFrameMessage(event.payload, deps));
 }
 
 // Re-tematizar el preview ya renderizado (editor/chrome se actualizan solos via vars).
