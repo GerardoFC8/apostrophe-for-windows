@@ -16,6 +16,9 @@
 //   editor.
 // - Imágenes. Doble clic sobre una imagen la amplía al tamaño de la vista; clic o Esc la
 //   cierra. Todo dentro del iframe: no hace falta salir de él.
+// - Scroll sincronizado. La ventana manda qué título poner arriba y cuánto avanzar hacia el
+//   siguiente (scroll-sync.ts); el iframe lo traduce a su propio desplazamiento. Al cargar
+//   avisa que está listo, porque cada render lo vuelve a crear desde arriba.
 export const FRAME_SCRIPT = `<script>
 (function () {
   function post(data) {
@@ -79,11 +82,61 @@ export const FRAME_SCRIPT = `<script>
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") closeImage();
   });
+
+  var lastSync = null;
+  function headings() {
+    return Array.prototype.filter.call(
+      document.querySelectorAll("h1,h2,h3,h4,h5,h6"),
+      function (h) { return !h.closest("#title-block-header"); });
+  }
+  function topOf(el) {
+    return el.getBoundingClientRect().top + window.scrollY - 12;
+  }
+  function applySync(s) {
+    lastSync = s;
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    if (s.end) { window.scrollTo(0, max); return; }
+    var hs = headings();
+    var start = s.index >= 0 && hs[s.index] ? topOf(hs[s.index]) : 0;
+    var end = hs[s.index + 1] ? topOf(hs[s.index + 1]) : max;
+    var target = start + Math.max(0, end - start) * s.fraction;
+    window.scrollTo(0, Math.min(max, Math.max(0, target)));
+  }
+  window.addEventListener("message", function (e) {
+    if (e.source === parent && e.data && e.data.elisionSync) applySync(e.data.elisionSync);
+  });
+  // La posición propia, en los mismos términos (título + fracción): la ventana la guarda para
+  // restaurarla cuando el iframe se recargue, también si se desplazó a mano.
+  var reporting = false;
+  window.addEventListener("scroll", function () {
+    if (reporting) return;
+    reporting = true;
+    requestAnimationFrame(function () {
+      reporting = false;
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (window.scrollY > 0 && window.scrollY >= max - 2) {
+        post({ elisionScrolled: { index: -1, fraction: 1, end: true } });
+        return;
+      }
+      var hs = headings(), index = -1;
+      for (var i = 0; i < hs.length && topOf(hs[i]) <= window.scrollY + 1; i++) index = i;
+      var start = index >= 0 ? topOf(hs[index]) : 0;
+      var end = hs[index + 1] ? topOf(hs[index + 1]) : max;
+      var fraction = end > start ? Math.min(1, Math.max(0, (window.scrollY - start) / (end - start))) : 0;
+      post({ elisionScrolled: { index: index, fraction: fraction } });
+    });
+  }, { passive: true });
+  // Las imágenes y las fórmulas cambian la altura al terminar de cargar: se reaplica.
+  window.addEventListener("load", function () { if (lastSync) applySync(lastSync); });
+  window.__elisionResync = function () { if (lastSync) applySync(lastSync); };
+  document.addEventListener("DOMContentLoaded", function () { post({ elisionReady: true }); });
 })();
 </script>`;
 
 /// Lo que el iframe pide a la ventana que lo contiene.
 export type FrameMessage =
+  | { kind: "ready" }
+  | { kind: "scrolled"; pos: { index: number; fraction: number; end?: boolean } }
   | { kind: "link"; href: string }
   | { kind: "zoom"; step: 1 | -1 | 0 }
   | { kind: "wheel"; deltaY: number };
@@ -93,6 +146,11 @@ export type FrameMessage =
 export function frameMessage(e: MessageEvent, frame: HTMLIFrameElement): FrameMessage | null {
   if (e.source !== frame.contentWindow) return null;
   const data = e.data as Record<string, unknown> | null;
+  if (data?.elisionReady === true) return { kind: "ready" };
+  const pos = data?.elisionScrolled as Record<string, unknown> | undefined;
+  if (pos && typeof pos.index === "number" && typeof pos.fraction === "number") {
+    return { kind: "scrolled", pos: { index: pos.index, fraction: pos.fraction, end: pos.end === true } };
+  }
   if (typeof data?.elisionLink === "string") return { kind: "link", href: data.elisionLink };
   if (data?.elisionZoom === 1 || data?.elisionZoom === -1 || data?.elisionZoom === 0) {
     return { kind: "zoom", step: data.elisionZoom };

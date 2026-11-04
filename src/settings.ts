@@ -28,6 +28,8 @@ export interface Settings {
   previewOpacity: number;
   /// La ventana de vista previa desacoplada queda encima de las demas.
   previewAlwaysOnTop: boolean;
+  /// El panel de esquema (títulos) está abierto.
+  outlineOpen: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -36,6 +38,7 @@ const DEFAULTS: Settings = {
   zoom: 1,
   previewOpacity: 1,
   previewAlwaysOnTop: false,
+  outlineOpen: false,
 };
 
 // Carga perezosa y memoizada del unico store: se abre una sola vez y se reusa la misma

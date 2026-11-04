@@ -20,6 +20,7 @@ pub mod inline;
 pub mod link;
 pub mod markup;
 pub mod math;
+pub mod outline;
 pub mod personal_dictionary;
 pub mod recents;
 pub mod snapshot;

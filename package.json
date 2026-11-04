@@ -1,7 +1,7 @@
 {
   "name": "apostrophe",
   "private": true,
-  "version": "0.5.0-beta.2",
+  "version": "0.5.0-beta.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,7 +19,8 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-store": "^2.4.3"
+    "@tauri-apps/plugin-store": "^2.4.3",
+    "mermaid": "12.2.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

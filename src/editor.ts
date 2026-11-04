@@ -82,6 +82,8 @@ export interface EditorDeps {
   currentDocId: () => number | undefined;
   /** Se pego una imagen sola (sin texto) desde el portapapeles. */
   onPasteImage: (image: File) => void;
+  /** Cambio el cursor o la seleccion (el esquema resalta la seccion actual). */
+  onSelectionChanged: () => void;
 }
 
 // Imagen del portapapeles, si lo que se pega es SOLO una imagen. Copiar celdas de Excel o un
@@ -196,6 +198,7 @@ function documentExtensions(): Extension[] {
     ),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) deps.onDocChanged();
+      if (update.selectionSet) deps.onSelectionChanged();
     }),
     EditorView.domEventHandlers({
       paste(event) {

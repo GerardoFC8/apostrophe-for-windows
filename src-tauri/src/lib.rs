@@ -140,6 +140,14 @@ fn count_stats(text: String) -> apostrophe_core::stats::Stats {
     apostrophe_core::stats::count(&text)
 }
 
+/// Titulos del documento (ver `apostrophe_core::outline`): alimentan el panel de esquema y
+/// el scroll sincronizado. Recorre el texto una vez, sin regex; es barato y va en el mismo
+/// debounce que las estadisticas.
+#[tauri::command]
+fn outline(text: String) -> Vec<apostrophe_core::outline::Heading> {
+    apostrophe_core::outline::outline(&text)
+}
+
 /// M17: tabla pipe vacia de `rows` x `cols`. Puro y barato: cruza la frontera igual que
 /// `count_stats` para que la logica viva en un solo lado (ADR-0001). El dominio recorta
 /// las dimensiones, asi que un valor absurdo no puede generar un documento gigante.
@@ -1999,6 +2007,7 @@ pub fn run() {
             paste_image,
             plan_drop,
             count_stats,
+            outline,
             set_content,
             open_document,
             open_path,
