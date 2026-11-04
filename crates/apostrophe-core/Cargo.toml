@@ -1,6 +1,6 @@
 [package]
 name = "apostrophe-core"
-version = "0.4.1"
+version = "0.5.0-beta.1"
 edition = "2021"
 description = "Nucleo de dominio puro de Apostrophe (hexagonal, ADR-0001): stats, parser de markup, conversion. Sin dependencias de UI/Tauri."
 authors = ["Gerardo Franco"]

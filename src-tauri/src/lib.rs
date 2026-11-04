@@ -22,6 +22,7 @@ use notify_debouncer_full::{
     Debouncer, RecommendedCache,
 };
 
+use apostrophe_core::personal_dictionary::{PersonalDictionary, WithPersonal};
 use apostrophe_core::recents::Recents;
 use apostrophe_core::spellcheck::{Misspelling, SpellChecker, SpellbookDictionary};
 use apostrophe_core::workspace::{DocId, Workspace};
@@ -181,6 +182,9 @@ async fn toggle_preview_window(app: tauri::AppHandle) -> Result<bool, String> {
     )
     .title("Elision")
     .inner_size(700.0, 800.0)
+    // Transparente para que su fondo pueda tener opacidad (la elige el usuario en la propia
+    // ventana). Con el control al maximo se ve igual que una ventana normal.
+    .transparent(true)
     .build()
     .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?;
     Ok(true)
@@ -425,6 +429,74 @@ async fn pick_image(
         &path,
         doc_dir.as_deref(),
     )))
+}
+
+/// Guarda una imagen pegada desde el portapapeles junto al documento y devuelve el
+/// `![](ruta)` para insertar. Donde va y como se llama lo decide el dominio
+/// (`pasted_image_path`): una carpeta `assets` al lado del `.md`, con ruta relativa.
+///
+/// `data` llega en base64: el portapapeles se lee en el webview y el IPC de comandos viaja
+/// como JSON. Una captura pesa pocos megas, y codificarla es mas barato que abrir otro canal.
+/// El formato sale del CONTENIDO (`sniff_format`), no de lo que diga el portapapeles.
+///
+/// El error es un CODIGO estable (`no-base-dir`, `unsupported`, `too-large`, `failed`): la
+/// copia visible vive en el catalogo de i18n del frontend.
+#[tauri::command]
+async fn paste_image(
+    docs: tauri::State<'_, Docs>,
+    data: String,
+    doc_id: Option<DocId>,
+) -> Result<String, String> {
+    use apostrophe_core::image::{
+        image_markdown, pasted_image_path, sniff_format, MAX_PASTED_IMAGE_BYTES,
+    };
+    use base64::Engine;
+
+    // Sin documento guardado no hay carpeta donde dejar la imagen.
+    let doc_path = {
+        let ws = docs.lock().unwrap();
+        ws.resolve(doc_id)
+            .and_then(|id| ws.get(id))
+            .and_then(|d| d.path().cloned())
+    }
+    .ok_or_else(|| "no-base-dir".to_string())?;
+
+    // Base64 infla un tercio: si el texto ya excede el tope, ni se decodifica.
+    if data.len() / 4 * 3 > MAX_PASTED_IMAGE_BYTES {
+        return Err("too-large".to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|_| "unsupported".to_string())?;
+    let format = sniff_format(&bytes).ok_or_else(|| "unsupported".to_string())?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let target = pasted_image_path(&doc_path, now, format, |p| p.exists());
+        let dir = target.parent().ok_or_else(|| "failed".to_string())?;
+        std::fs::create_dir_all(dir).map_err(|_| "failed".to_string())?;
+        std::fs::write(&target, &bytes).map_err(|_| "failed".to_string())?;
+        Ok(image_markdown(&target, doc_path.parent()))
+    })
+    .await
+    .map_err(|_| "failed".to_string())?
+}
+
+/// Clasifica los archivos soltados sobre la ventana (ver `apostrophe_core::dropped`): los
+/// `.md` se abren y las imagenes se insertan con su ruta relativa al documento activo.
+/// Abrir las pestañas y colocar el texto es tarea del frontend.
+#[tauri::command]
+fn plan_drop(
+    docs: tauri::State<'_, Docs>,
+    paths: Vec<String>,
+    doc_id: Option<DocId>,
+) -> apostrophe_core::dropped::DropPlan {
+    let doc_dir = target_doc_dir(&docs, doc_id);
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    apostrophe_core::dropped::plan_drop(&paths, doc_dir.as_deref())
 }
 
 // --- M4: gestion de documento (abrir / guardar) ---
@@ -1386,6 +1458,59 @@ async fn embed_html_images(path: &Path, doc_dir: Option<PathBuf>) -> Result<(), 
 /// Diccionario cargado (`None` hasta que el setup termina de cargarlo en background).
 pub struct SpellState(pub RwLock<Option<Arc<SpellbookDictionary>>>);
 
+/// Diccionario personal ("Agregar al diccionario"). Arc por la misma razon que `SpellState`:
+/// el chequeo lo clona barato y suelta el lock; agregar una palabra reemplaza el Arc.
+pub struct PersonalDictState(pub RwLock<Arc<PersonalDictionary>>);
+
+/// Archivo del diccionario personal: texto plano, una palabra por linea, editable a mano.
+/// Local y no roaming, igual que los recientes.
+fn personal_dictionary_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("no se pudo resolver app_local_data_dir: {e}"))?;
+    Ok(dir.join("personal-dictionary.txt"))
+}
+
+/// Lee el diccionario personal. Si el archivo no existe o no se puede leer, se arranca con
+/// la lista vacia: el corrector funciona igual.
+fn load_personal_dictionary(app: &tauri::AppHandle) -> PersonalDictionary {
+    personal_dictionary_file(app)
+        .and_then(|path| std::fs::read_to_string(path).map_err(|e| e.to_string()))
+        .map(|text| PersonalDictionary::parse(&text))
+        .unwrap_or_default()
+}
+
+/// Agrega una palabra al diccionario personal y lo guarda. Las ondulitas de esa palabra las
+/// quita el frontend en el momento; el proximo chequeo ya no la marca.
+#[tauri::command]
+async fn add_to_dictionary(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PersonalDictState>,
+    word: String,
+) -> Result<(), String> {
+    let updated = {
+        let mut guard = state.0.write().unwrap();
+        let mut next = PersonalDictionary::clone(&guard);
+        if !next.add(&word) {
+            return Ok(()); // ya estaba: no hay nada que guardar
+        }
+        let next = Arc::new(next);
+        *guard = Arc::clone(&next);
+        next
+    };
+    let path = personal_dictionary_file(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&path, updated.to_file_text())
+    })
+    .await
+    .map_err(|e| format!("error al guardar el diccionario personal: {e}"))?
+    .map_err(|e| format!("no se pudo guardar el diccionario personal: {e}"))
+}
+
 /// Chequeo ortografico. Contrato: spellcheck(text, focus_mode) -> [{word, from, to,
 /// suggestions}] con char-offsets. focus_mode=true corto-circuita a [] (ADR-0001 D2).
 /// El chequeo de doc completo es CPU-bound -> spawn_blocking.
@@ -1394,6 +1519,7 @@ async fn spellcheck(
     text: String,
     focus_mode: bool,
     state: tauri::State<'_, SpellState>,
+    personal: tauri::State<'_, PersonalDictState>,
 ) -> Result<Vec<Misspelling>, String> {
     if focus_mode {
         return Ok(Vec::new()); // ni lock ni computo
@@ -1406,8 +1532,13 @@ async fn spellcheck(
             None => return Ok(Vec::new()), // dict aun no cargado: spellcheck no critico
         }
     };
+    let personal = Arc::clone(&personal.0.read().unwrap());
     tauri::async_runtime::spawn_blocking(move || {
-        SpellChecker::check_text(dict.as_ref(), &text, false)
+        let dict = WithPersonal {
+            base: dict.as_ref(),
+            personal: &personal,
+        };
+        SpellChecker::check_text(&dict, &text, false)
     })
     .await
     .map_err(|e| format!("error en el chequeo ortografico: {e}"))
@@ -1435,8 +1566,14 @@ fn load_dictionary(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let h = handle.clone();
-        let loaded =
-            tauri::async_runtime::spawn_blocking(move || load_bundled_dictionary(&h)).await;
+        let loaded = tauri::async_runtime::spawn_blocking(move || {
+            // El personal se lee aqui, antes del aviso `spell-dict-ready`: asi el primer
+            // chequeo completo ya no marca las palabras agregadas.
+            *h.state::<PersonalDictState>().0.write().unwrap() =
+                Arc::new(load_personal_dictionary(&h));
+            load_bundled_dictionary(&h)
+        })
+        .await;
         match loaded {
             Ok(Ok(dict)) => {
                 *handle.state::<SpellState>().0.write().unwrap() = Some(Arc::new(dict));
@@ -1778,6 +1915,7 @@ pub fn run() {
         // Pestañas: el workspace arranca con un documento nuevo vacio, como antes.
         .manage(Mutex::new(initial_workspace()))
         .manage(SpellState(RwLock::new(None)))
+        .manage(PersonalDictState(RwLock::new(Arc::default())))
         .manage(PendingFiles(Mutex::new(Vec::new())))
         // M8.4b: watchers de cambios externos, uno por documento con ruta.
         .manage(FileWatchers(Mutex::new(HashMap::new())))
@@ -1858,6 +1996,8 @@ pub fn run() {
             render_image,
             open_preview_link,
             pick_image,
+            paste_image,
+            plan_drop,
             count_stats,
             set_content,
             open_document,
@@ -1868,6 +2008,7 @@ pub fn run() {
             save_document_as,
             export_document,
             spellcheck,
+            add_to_dictionary,
             parse_markup,
             take_pending_file,
             take_pending_files,

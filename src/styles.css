@@ -673,6 +673,17 @@ body {
   background: var(--hover);
 }
 
+.spell-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+/* "Agregar al diccionario": accion, no sugerencia; se distingue de las palabras. */
+.spell-add {
+  opacity: 0.8;
+}
+
 /* --- M9.1: modo enfoque (Ctrl+D) --- */
 /* Atenúa el texto fuera del párrafo enfocado. Equivalente cross-tema al foreground='gray'
    del upstream (tag 'unfocused_text'); aquí opacidad para que ande en los tres temas. */

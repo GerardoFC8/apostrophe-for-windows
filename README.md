@@ -18,8 +18,15 @@ Editor de Markdown nativo, minimalista y libre de distracciones para Windows (an
 - Exportación a **PDF, HTML, ODT, DOCX, EPUB y LaTeX** (Ctrl+E) — el formato se elige en
   el desplegable "Guardar como tipo" del diálogo. Lo resuelven los sidecars bundleados
   (pandoc y typst): no necesitas instalar nada más.
-- Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust).
-- CLI `elision` para agentes de IA y scripts (ver [CLI para agentes](#cli-para-agentes-elision)).
+- Corrector ortográfico en español (Hunspell vía `spellbook`, puro-Rust), con diccionario
+  personal: clic derecho sobre una palabra subrayada → **Agregar al diccionario**.
+- Imágenes: **pegar con Ctrl+V** (se guardan en la carpeta `assets` junto al documento) o
+  **arrastrarlas** a la ventana. Arrastrar un `.md` lo abre en una pestaña.
+- **Zoom del texto** con `Ctrl +` / `Ctrl -` / `Ctrl 0` o `Ctrl` + rueda del mouse.
+- Vista previa en una ventana aparte, con **opacidad del fondo** y **siempre visible**
+  (los controles aparecen al pasar el mouse por la ventana).
+- CLI `elision` para agentes de IA y scripts, y `elision view` para leer un documento con
+  formato en la terminal (ver [CLI para agentes](#cli-para-agentes-elision)).
 
 ## Pestañas
 
@@ -140,6 +147,7 @@ elision export notas.md -o notas.pdf
 | `tables <in> [--check \| --write]` | Revisa (por defecto) o reescribe la alineación de todas las tablas. | hay tablas desalineadas (solo `--check`) |
 | `spell <in> [--dict-dir <dir>]` | Ortografía en español, con línea y columna (base 1). | hay errores |
 | `open <archivos>...` | Abre cada archivo en su propia pestaña del editor, sin esperar a que se cierre. | — |
+| `view <in> [--width <n>] [--no-color]` | Muestra el documento con formato en la terminal, ajustado a su ancho: títulos, énfasis, listas, citas, código y tablas. Con colores solo si la salida es una terminal (y sin `NO_COLOR`). | — |
 
 - **Entrada estándar:** `<in>` puede ser `-` (salvo con `tables --write`). Se decodifica igual
   que un archivo: UTF-8 u otra codificación que la app sepa abrir. Con `-`, `export` no tiene

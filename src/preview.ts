@@ -5,7 +5,7 @@ import { listen, emit } from "@tauri-apps/api/event";
 import { view, getText } from "./editor";
 import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
 import { LINK_SCRIPT, linkFromMessage } from "./preview-link";
 
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
@@ -33,9 +33,15 @@ function markdownStylesheet(v: (name: string) => string): string {
   </style>`;
 }
 
+// El zoom del texto (zoom.ts) solo va en la vista previa: lo que se exporta sale siempre a
+// tamaño normal.
 function previewStyle(): string {
   const cs = getComputedStyle(document.documentElement);
-  return markdownStylesheet((name) => cs.getPropertyValue(name).trim());
+  const zoom = cs.getPropertyValue("--text-zoom").trim() || "1";
+  return (
+    markdownStylesheet((name) => cs.getPropertyValue(name).trim()) +
+    `<style>body{font-size:calc(100% * ${zoom});}</style>`
+  );
 }
 
 // Tema para EXPORTAR: siempre la paleta CLARA, sin importar el tema activo. Un HTML o un
@@ -132,10 +138,25 @@ export async function render(): Promise<void> {
 
 const previewWindowBtn = document.querySelector<HTMLButtonElement>("#preview-window-btn")!;
 
+// Lo que recibe la ventana desacoplada. El color de fondo viaja aparte del HTML porque esa
+// ventana lo pinta ella misma, con la opacidad que elija el usuario; el idioma, para las
+// etiquetas de sus controles.
+export interface PreviewPayload {
+  html: string;
+  background: string;
+  locale: string;
+}
+
 // Manda el HTML actual a la ventana desacoplada. Se emite SIEMPRE, aunque no haya ventana:
 // un evento sin destinatario no cuesta nada y evita tener que rastrear si esta abierta.
 function pushToPreviewWindow(): void {
-  if (lastPreviewHtml) void emit("preview-html", withTheme(lastPreviewHtml));
+  if (!lastPreviewHtml) return;
+  const payload: PreviewPayload = {
+    html: withTheme(lastPreviewHtml),
+    background: getComputedStyle(document.documentElement).getPropertyValue("--preview-bg").trim(),
+    locale: getLocale(),
+  };
+  void emit("preview-html", payload);
 }
 
 async function togglePreviewWindow(): Promise<void> {

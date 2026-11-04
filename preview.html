@@ -8,8 +8,15 @@
     <style>
       /* Página mínima a propósito: NO importa styles.css. El HTML renderizado trae su
          propia hoja de estilos inyectada por la ventana principal, igual que el preview
-         embebido. Aquí solo se necesita que el iframe ocupe todo. */
-      html,
+         embebido. Aquí solo se necesita que el iframe ocupe todo.
+
+         La ventana es transparente: el fondo lo pinta este body con el color del tema y la
+         opacidad elegida (preview-window.ts), y el documento del iframe va sin fondo. */
+      html {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+      }
       body {
         margin: 0;
         height: 100%;
@@ -21,6 +28,51 @@
         height: 100%;
         border: 0;
       }
+
+      /* Controles: aparecen al pasar el mouse por la ventana y no tapan el texto el resto
+         del tiempo. Colores neutros con sombra, legibles sobre cualquier tema. */
+      .controls {
+        position: fixed;
+        top: 8px;
+        right: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        border-radius: 8px;
+        background: rgba(40, 40, 40, 0.82);
+        color: #ffffff;
+        font: 12px system-ui, sans-serif;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        opacity: 0;
+        transition: opacity 150ms ease;
+      }
+      body:hover .controls,
+      .controls:focus-within {
+        opacity: 1;
+      }
+      .controls button {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      .controls button:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
+      .controls button[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.28);
+      }
+      .controls input[type="range"] {
+        width: 110px;
+        accent-color: #ffffff;
+      }
     </style>
   </head>
   <body>
@@ -28,5 +80,17 @@
          genera pandoc NO puede alcanzar window.parent.__TAURI__ (cierra XSS vía .md
          malicioso). allow-scripts deja correr MathJax. -->
     <iframe id="frame" sandbox="allow-scripts"></iframe>
+    <div class="controls">
+      <button id="pin" type="button" aria-pressed="false">
+        <!-- Chincheta -->
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M9.83 1.5a1 1 0 0 0-1.6 1.16L5.6 5.3a3.5 3.5 0 0 0-3.07.98.75.75 0 0 0 0 1.06L5.2 10l-3.47 3.47a.75.75 0 1 0 1.06 1.06L6.26 11.06l2.66 2.67a.75.75 0 0 0 1.06 0 3.5 3.5 0 0 0 .98-3.07l2.64-2.64a1 1 0 0 0 1.16-1.6z"
+          />
+        </svg>
+      </button>
+      <input id="opacity" type="range" min="20" max="100" step="5" value="100" />
+    </div>
   </body>
 </html>

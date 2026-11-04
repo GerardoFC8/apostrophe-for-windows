@@ -1,6 +1,7 @@
 //! CLI `elision`: segundo adaptador primario de la arquitectura hexagonal (ADR-0001),
-//! junto a la GUI. Expone el export, las estadisticas, las tablas, la ortografia y la
-//! apertura de archivos a scripts y agentes de IA, con salida estable y sin interaccion.
+//! junto a la GUI. Expone el export, las estadisticas, las tablas, la ortografia, la
+//! apertura de archivos y la lectura en la terminal a scripts, agentes de IA y personas,
+//! con salida estable y sin interaccion.
 //!
 //! Es una biblioteca: el ejecutable es un envoltorio minimo que arma el [`Env`] real y
 //! llama a [`run`]. Asi todo se prueba en proceso, con buffers y un entorno falso.
@@ -16,6 +17,8 @@ pub mod error;
 pub mod input;
 pub mod output;
 pub mod position;
+pub mod render;
+pub mod terminal;
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -53,6 +56,8 @@ pub struct Env<'a> {
     /// Lanza la GUI con estos archivos sin esperarla (en produccion,
     /// `commands::open::launch_detached`).
     pub launch: &'a dyn Fn(&Path, &[PathBuf]) -> io::Result<()>,
+    /// Si stdout es una terminal, su ancho y si admite color. Solo lo usa `view`.
+    pub terminal: terminal::Terminal,
 }
 
 /// Ejecuta la CLI con `args` (el primero es el nombre del programa) y devuelve el codigo
@@ -74,6 +79,7 @@ where
         Command::Tables(args) => finish(commands::tables::execute(&args, env, io.stdin), json, io),
         Command::Spell(args) => finish(commands::spell::execute(&args, env, io.stdin), json, io),
         Command::Open(args) => finish(commands::open::execute(&args, env), json, io),
+        Command::View(args) => finish(commands::view::execute(&args, env, io.stdin), json, io),
     }
 }
 

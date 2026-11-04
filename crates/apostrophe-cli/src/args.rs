@@ -18,8 +18,8 @@ With --json, stdout carries a single ASCII-only JSON object, errors included: \
     name = "elision",
     bin_name = "elision",
     version,
-    about = "Markdown tools for scripts and AI agents: export, statistics, tables, spelling \
-             and opening files in the editor.",
+    about = "Markdown tools for scripts and AI agents: export, statistics, tables, spelling, \
+             opening files in the editor and reading them in the terminal.",
     after_help = AFTER_HELP
 )]
 pub struct Cli {
@@ -43,6 +43,8 @@ pub enum Command {
     Spell(SpellArgs),
     /// Open files in the editor without waiting for it to close
     Open(OpenArgs),
+    /// Show a document formatted in the terminal, wrapped to its width
+    View(ViewArgs),
 }
 
 #[derive(Debug, Args)]
@@ -98,6 +100,21 @@ pub struct OpenArgs {
     /// Files to open, each in its own tab
     #[arg(required = true, value_name = "FILE")]
     pub files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct ViewArgs {
+    /// Markdown file, or - to read standard input
+    #[arg(value_name = "FILE")]
+    pub input: PathBuf,
+
+    /// Wrap to this many columns instead of the terminal width (80 when not a terminal)
+    #[arg(long, value_name = "COLUMNS", value_parser = clap::value_parser!(usize))]
+    pub width: Option<usize>,
+
+    /// No colors, even in a terminal (also with the NO_COLOR variable)
+    #[arg(long)]
+    pub no_color: bool,
 }
 
 /// Formatos de `--to`. Son los de la GUI; LaTeX se pide por su nombre, no por `.tex`.

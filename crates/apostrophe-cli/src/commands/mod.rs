@@ -26,3 +26,4 @@ pub mod open;
 pub mod spell;
 pub mod stats;
 pub mod tables;
+pub mod view;

@@ -32,7 +32,8 @@ const editorTheme = EditorView.theme({
   "&": { height: "100%", color: "var(--editor-fg)" },
   ".cm-scroller": {
     fontFamily: '"JetBrains Mono Variable", "Cascadia Code", ui-monospace, monospace',
-    fontSize: "14px",
+    // --text-zoom la fija zoom.ts (Ctrl + / Ctrl - / Ctrl + rueda).
+    fontSize: "calc(14px * var(--text-zoom, 1))",
     lineHeight: "1.6",
   },
   ".cm-content": { padding: "1rem", caretColor: "var(--accent)" },
@@ -79,6 +80,20 @@ export interface EditorDeps {
   onAlignTable: () => Promise<unknown>;
   /** Documento de la pestaña activa: el popover de imagenes resuelve rutas contra SU carpeta. */
   currentDocId: () => number | undefined;
+  /** Se pego una imagen sola (sin texto) desde el portapapeles. */
+  onPasteImage: (image: File) => void;
+}
+
+// Imagen del portapapeles, si lo que se pega es SOLO una imagen. Copiar celdas de Excel o un
+// fragmento de Word trae texto y ademas una imagen del mismo contenido: ahi lo que se quiere
+// es el texto, asi que con texto presente se deja el pegado normal.
+function pastedImage(event: ClipboardEvent): File | null {
+  const data = event.clipboardData;
+  if (!data || data.getData("text/plain") !== "") return null;
+  for (const item of Array.from(data.items)) {
+    if (item.kind === "file" && item.type.startsWith("image/")) return item.getAsFile();
+  }
+  return null;
 }
 
 // Compartments de los modos GLOBALES. Cada EditorState guarda su propia configuracion de
@@ -181,6 +196,15 @@ function documentExtensions(): Extension[] {
     ),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) deps.onDocChanged();
+    }),
+    EditorView.domEventHandlers({
+      paste(event) {
+        const image = pastedImage(event);
+        if (!image) return false;
+        event.preventDefault();
+        deps.onPasteImage(image);
+        return true;
+      },
     }),
   ];
 }

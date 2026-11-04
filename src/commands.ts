@@ -48,17 +48,57 @@ export async function insertImage(): Promise<void> {
       docId: activeDocId(),
     });
     if (!snippet) return; // el usuario canceló el selector
-    const sel = view.state.selection.main;
-    view.dispatch({
-      changes: { from: sel.from, to: sel.to, insert: snippet },
-      // Entre `![` y `](`: el alt va vacío justamente para caer acá.
-      selection: { anchor: sel.from + 2 },
-      scrollIntoView: true,
-    });
-    view.focus();
+    insertImageSnippet(snippet);
   } catch (err) {
     flashStatus(`${t("error.generic")}: ${String(err)}`, 4000);
   }
+}
+
+// Inserta un `![](ruta)` en el cursor y deja el cursor entre los corchetes del alt: el alt va
+// vacío justamente para caer ahí, que es lo primero que conviene escribir.
+function insertImageSnippet(snippet: string): void {
+  const sel = view.state.selection.main;
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert: snippet },
+    selection: { anchor: sel.from + 2 },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
+const PASTE_ERRORS: Record<string, () => string> = {
+  "no-base-dir": () => t("status.pasteImageNoBaseDir"),
+  "too-large": () => t("status.pasteImageTooLarge"),
+  unsupported: () => t("status.pasteImageUnsupported"),
+};
+
+// Pegar una imagen (Ctrl+V con una captura en el portapapeles): el backend la guarda en la
+// carpeta `assets` junto al documento y devuelve el `![](ruta)` relativo.
+export async function pasteImage(image: File): Promise<void> {
+  const docId = activeDocId();
+  try {
+    const data = await fileToBase64(image);
+    const snippet = await invoke<string>("paste_image", { data, docId });
+    // Si mientras se guardaba se cambió de pestaña, el texto iría a otro documento.
+    if (activeDocId() !== docId) return;
+    insertImageSnippet(snippet);
+    flashStatus(t("status.pasteImageSaved"));
+  } catch (err) {
+    flashStatus((PASTE_ERRORS[String(err)] ?? (() => t("status.pasteImageFailed")))(), 5000);
+  }
+}
+
+// Contenido del archivo en base64, sin el prefijo `data:...;base64,` del data URL.
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 // Realinea la tabla sobre la que está el cursor. El bloque se delimita por renglones en

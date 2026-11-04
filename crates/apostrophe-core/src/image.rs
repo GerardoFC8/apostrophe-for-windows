@@ -46,6 +46,17 @@ impl ImageFormat {
         }
     }
 
+    /// Extension con la que se guarda un archivo de este formato.
+    pub fn extension(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::Gif => "gif",
+            ImageFormat::Webp => "webp",
+            ImageFormat::Svg => "svg",
+        }
+    }
+
     fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
             "png" => Some(ImageFormat::Png),
@@ -344,9 +355,141 @@ pub(crate) fn extension_of(path: &str) -> Option<&str> {
     Some(&name[dot + 1..])
 }
 
+/// Carpeta, junto al documento, donde se guardan las imagenes pegadas desde el portapapeles.
+///
+/// Una sola carpeta por directorio, con un nombre que entiende cualquier herramienta de
+/// Markdown (GitHub, VS Code, Obsidian): las imagenes no se mezclan con los `.md` y mover la
+/// carpeta entera no rompe nada, porque las rutas que se escriben son relativas.
+pub const PASTED_IMAGES_DIR: &str = "assets";
+
+/// Tope de tamano de una imagen pegada. Una captura de pantalla pesa unos pocos megas; algo
+/// mucho mayor casi seguro no es lo que se queria pegar.
+pub const MAX_PASTED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+
+/// Donde guardar una imagen pegada en el documento `doc_path`.
+///
+/// El nombre lleva el del documento y la fecha (`notas-20261104-180512.png`): sale ordenado
+/// en el explorador y, viendo la carpeta, se sabe de que documento es cada imagen. Si el
+/// nombre ya existe (dos pegados en el mismo segundo) se agrega `-2`, `-3`… `exists` es la
+/// unica consulta al disco, y la hace quien llama.
+///
+/// `unix_secs` es la hora del pegado; la fecha sale en UTC, que basta para ordenar y no
+/// obliga al dominio a conocer la zona horaria.
+pub fn pasted_image_path(
+    doc_path: &Path,
+    unix_secs: u64,
+    format: ImageFormat,
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    let dir = doc_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(PASTED_IMAGES_DIR);
+    let stem = doc_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "imagen".to_string());
+    let base = format!("{stem}-{}", utc_stamp(unix_secs));
+    let ext = format.extension();
+    let mut n = 1;
+    loop {
+        let name = if n == 1 {
+            format!("{base}.{ext}")
+        } else {
+            format!("{base}-{n}.{ext}")
+        };
+        let candidate = dir.join(name);
+        if !exists(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// `AAAAMMDD-HHMMSS` en UTC para un instante en segundos desde 1970.
+fn utc_stamp(unix_secs: u64) -> String {
+    let days = (unix_secs / 86_400) as i64;
+    let rem = unix_secs % 86_400;
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// Fecha civil (proleptica gregoriana) de un dia contado desde 1970-01-01. Algoritmo de
+/// Howard Hinnant (`civil_from_days`), exacto para cualquier fecha.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_imagen_pegada_va_a_assets_con_el_nombre_del_documento_y_la_fecha() {
+        // 2026-11-04 18:05:12 UTC
+        let path = pasted_image_path(
+            Path::new("/home/ana/notas/RESUMEN.md"),
+            1_793_815_512,
+            ImageFormat::Png,
+            |_| false,
+        );
+        assert_eq!(
+            path,
+            PathBuf::from("/home/ana/notas/assets/RESUMEN-20261104-180512.png")
+        );
+    }
+
+    #[test]
+    fn si_el_nombre_ya_existe_se_numera() {
+        let taken = [
+            PathBuf::from("/n/assets/a-19700101-000000.jpg"),
+            PathBuf::from("/n/assets/a-19700101-000000-2.jpg"),
+        ];
+        let path = pasted_image_path(Path::new("/n/a.md"), 0, ImageFormat::Jpeg, |p| {
+            taken.iter().any(|t| t == p)
+        });
+        assert_eq!(path, PathBuf::from("/n/assets/a-19700101-000000-3.jpg"));
+    }
+
+    #[test]
+    fn la_fecha_utc_es_correcta_en_bordes_de_mes_y_bisiestos() {
+        assert_eq!(utc_stamp(0), "19700101-000000");
+        assert_eq!(utc_stamp(951_782_399), "20000228-235959");
+        assert_eq!(utc_stamp(951_782_400), "20000229-000000");
+        assert_eq!(utc_stamp(1_709_251_199), "20240229-235959");
+        assert_eq!(utc_stamp(1_798_761_599), "20261231-235959");
+    }
+
+    #[test]
+    fn cada_formato_tiene_su_extension() {
+        for format in [
+            ImageFormat::Png,
+            ImageFormat::Jpeg,
+            ImageFormat::Gif,
+            ImageFormat::Webp,
+            ImageFormat::Svg,
+        ] {
+            assert_eq!(
+                ImageFormat::from_extension(format.extension()),
+                Some(format)
+            );
+        }
+    }
 
     fn dir() -> PathBuf {
         PathBuf::from("/home/ana/notas")

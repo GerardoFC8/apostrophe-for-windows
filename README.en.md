@@ -21,8 +21,15 @@ with **Tauri 2 + Rust** on a hexagonal architecture
 - Export to **PDF, HTML, ODT, DOCX, EPUB and LaTeX** (Ctrl+E) — pick the format from the
   dialog's "Save as type" dropdown. The bundled sidecars (pandoc and typst) handle
   everything: nothing else to install.
-- Spanish spell checking (Hunspell via `spellbook`, pure Rust).
-- `elision` CLI for AI agents and scripts (see [CLI for agents](#cli-for-agents-elision)).
+- Spanish spell checking (Hunspell via `spellbook`, pure Rust), with a personal dictionary:
+  right-click an underlined word → **Add to dictionary**.
+- Images: **paste with Ctrl+V** (saved in an `assets` folder next to the document) or
+  **drag them** onto the window. Dragging a `.md` opens it in a tab.
+- **Text zoom** with `Ctrl +` / `Ctrl -` / `Ctrl 0` or `Ctrl` + mouse wheel.
+- Preview in a separate window, with **background opacity** and **always on top** (the
+  controls appear when the mouse is over the window).
+- `elision` CLI for AI agents and scripts, plus `elision view` to read a document formatted
+  in the terminal (see [CLI for agents](#cli-for-agents-elision)).
 
 ## Tabs
 
@@ -143,6 +150,7 @@ elision export notes.md -o notes.pdf
 | `tables <in> [--check \| --write]` | Checks (the default) or rewrites the alignment of every table. | there are misaligned tables (`--check` only) |
 | `spell <in> [--dict-dir <dir>]` | Spanish spelling, with line and column (1-based). | there are misspellings |
 | `open <files>...` | Opens each file in its own editor tab, without waiting for the editor to close. | — |
+| `view <in> [--width <n>] [--no-color]` | Shows the document formatted in the terminal, wrapped to its width: headings, emphasis, lists, quotes, code and tables. Colors only when the output is a terminal (and `NO_COLOR` is not set). | — |
 
 - **Standard input:** `<in>` can be `-` (except with `tables --write`). It is decoded like a
   file: UTF-8 or any other encoding the app can open. With `-`, `export` has no document
