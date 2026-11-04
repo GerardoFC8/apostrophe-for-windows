@@ -182,6 +182,9 @@ async fn toggle_preview_window(app: tauri::AppHandle) -> Result<bool, String> {
     )
     .title("Elision")
     .inner_size(700.0, 800.0)
+    // Transparente para que su fondo pueda tener opacidad (la elige el usuario en la propia
+    // ventana). Con el control al maximo se ve igual que una ventana normal.
+    .transparent(true)
     .build()
     .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?;
     Ok(true)

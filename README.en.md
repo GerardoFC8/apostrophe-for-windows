@@ -21,8 +21,15 @@ with **Tauri 2 + Rust** on a hexagonal architecture
 - Export to **PDF, HTML, ODT, DOCX, EPUB and LaTeX** (Ctrl+E) — pick the format from the
   dialog's "Save as type" dropdown. The bundled sidecars (pandoc and typst) handle
   everything: nothing else to install.
-- Spanish spell checking (Hunspell via `spellbook`, pure Rust).
-- `elision` CLI for AI agents and scripts (see [CLI for agents](#cli-for-agents-elision)).
+- Spanish spell checking (Hunspell via `spellbook`, pure Rust), with a personal dictionary:
+  right-click an underlined word → **Add to dictionary**.
+- Images: **paste with Ctrl+V** (saved in an `assets` folder next to the document) or
+  **drag them** onto the window. Dragging a `.md` opens it in a tab.
+- **Text zoom** with `Ctrl +` / `Ctrl -` / `Ctrl 0` or `Ctrl` + mouse wheel.
+- Preview in a separate window, with **background opacity** and **always on top** (the
+  controls appear when the mouse is over the window).
+- `elision` CLI for AI agents and scripts, plus `elision view` to read a document formatted
+  in the terminal (see [CLI for agents](#cli-for-agents-elision)).
 
 ## Tabs
 

@@ -24,12 +24,18 @@ export interface Settings {
   language: "es" | "en" | null;
   /// Zoom del texto del editor y la vista previa (1 = 100 %). Ver zoom.ts.
   zoom: number;
+  /// Opacidad del fondo de la ventana de vista previa desacoplada (0.2 a 1).
+  previewOpacity: number;
+  /// La ventana de vista previa desacoplada queda encima de las demas.
+  previewAlwaysOnTop: boolean;
 }
 
 const DEFAULTS: Settings = {
   spellcheck: true,
   language: null,
   zoom: 1,
+  previewOpacity: 1,
+  previewAlwaysOnTop: false,
 };
 
 // Carga perezosa y memoizada del unico store: se abre una sola vez y se reusa la misma

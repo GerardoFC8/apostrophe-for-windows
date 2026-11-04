@@ -126,6 +126,8 @@ export interface Messages {
   "status.dropIgnored": string;
   "status.wordAdded": string;
   "status.zoom": string;
+  "previewWindow.alwaysOnTop": string;
+  "previewWindow.opacity": string;
   "spell.addToDictionary": string;
   "error.open": string;
   "error.save": string;
@@ -290,6 +292,8 @@ const ES: Messages = {
   "status.wordAdded": "«{word}» agregada al diccionario",
   "spell.addToDictionary": "Agregar al diccionario",
   "status.zoom": "zoom {percent} %",
+  "previewWindow.alwaysOnTop": "Mantener siempre visible",
+  "previewWindow.opacity": "Opacidad del fondo",
   "status.tableAligned": "tabla alineada",
   "status.notATable": "el cursor no está sobre una tabla",
   "error.open": "error al abrir",
@@ -455,6 +459,8 @@ const EN: Messages = {
   "status.wordAdded": "“{word}” added to the dictionary",
   "spell.addToDictionary": "Add to dictionary",
   "status.zoom": "zoom {percent}%",
+  "previewWindow.alwaysOnTop": "Always on top",
+  "previewWindow.opacity": "Background opacity",
   "status.tableAligned": "table aligned",
   "status.notATable": "the cursor is not on a table",
   "error.open": "error opening the file",
