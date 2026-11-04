@@ -73,7 +73,7 @@ La forma más sencilla es con [winget](https://learn.microsoft.com/windows/packa
 el gestor de paquetes que ya viene en Windows 10 y 11. Desde PowerShell o la terminal:
 
 ```powershell
-winget install GerardoFC8.ApostropheForWindows
+winget install elision
 ```
 
 No pide permisos de administrador: la app se instala solo para tu usuario.
@@ -81,9 +81,22 @@ No pide permisos de administrador: la app se instala solo para tu usuario.
 Para actualizar o desinstalar:
 
 ```powershell
-winget upgrade GerardoFC8.ApostropheForWindows
-winget uninstall GerardoFC8.ApostropheForWindows
+winget upgrade elision
+winget uninstall elision
 ```
+
+`elision` es el nombre corto del paquete. Su identificador completo, que también sirve en
+todos estos comandos, es `GerardoFC8.ApostropheForWindows`: se conserva del nombre anterior
+de la app para que quien ya la tenía siga recibiendo las actualizaciones.
+
+> **¿Tenías Apostrophe para Windows (0.3.0 o anterior)?** Desinstálalo antes de instalar
+> Elision: por el cambio de nombre, Elision se instala como una aplicación aparte y no lo
+> reemplaza. Tus preferencias y recientes se conservan.
+>
+> ```powershell
+> winget uninstall GerardoFC8.ApostropheForWindows
+> winget install elision
+> ```
 
 > La versión de winget puede tardar unos días en alcanzar a la última release. Si
 > quieres la más reciente, descarga `Elision_<versión>_x64-setup.exe` desde
