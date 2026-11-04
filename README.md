@@ -140,6 +140,7 @@ elision export notas.md -o notas.pdf
 | `tables <in> [--check \| --write]` | Revisa (por defecto) o reescribe la alineación de todas las tablas. | hay tablas desalineadas (solo `--check`) |
 | `spell <in> [--dict-dir <dir>]` | Ortografía en español, con línea y columna (base 1). | hay errores |
 | `open <archivos>...` | Abre cada archivo en su propia pestaña del editor, sin esperar a que se cierre. | — |
+| `view <in> [--width <n>] [--no-color]` | Muestra el documento con formato en la terminal, ajustado a su ancho: títulos, énfasis, listas, citas, código y tablas. Con colores solo si la salida es una terminal (y sin `NO_COLOR`). | — |
 
 - **Entrada estándar:** `<in>` puede ser `-` (salvo con `tables --write`). Se decodifica igual
   que un archivo: UTF-8 u otra codificación que la app sepa abrir. Con `-`, `export` no tiene

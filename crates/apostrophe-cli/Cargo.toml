@@ -14,5 +14,15 @@ apostrophe-sidecars = { path = "../apostrophe-sidecars" }
 # agentes. Sin `color` ni el resto de los defaults: la salida es la misma en cualquier
 # terminal (y sin codigos ANSI cuando stdout es un pipe).
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+# `view`: parser de Markdown puro-Rust para dibujar el documento en la terminal. Sin los
+# defaults (el ejecutable de pulldown-cmark y su salida HTML), que no hacen falta.
+pulldown-cmark = { version = "0.13.6", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `view`: ancho de la terminal y ancho en columnas del texto (acentos, CJK) para ajustarlo.
+terminal_size = "0.4.4"
+unicode-width = "0.2.3"
+
+# `view`: activar las secuencias ANSI de color en la consola clasica de Windows.
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }

@@ -143,6 +143,7 @@ elision export notes.md -o notes.pdf
 | `tables <in> [--check \| --write]` | Checks (the default) or rewrites the alignment of every table. | there are misaligned tables (`--check` only) |
 | `spell <in> [--dict-dir <dir>]` | Spanish spelling, with line and column (1-based). | there are misspellings |
 | `open <files>...` | Opens each file in its own editor tab, without waiting for the editor to close. | — |
+| `view <in> [--width <n>] [--no-color]` | Shows the document formatted in the terminal, wrapped to its width: headings, emphasis, lists, quotes, code and tables. Colors only when the output is a terminal (and `NO_COLOR` is not set). | — |
 
 - **Standard input:** `<in>` can be `-` (except with `tables --write`). It is decoded like a
   file: UTF-8 or any other encoding the app can open. With `-`, `export` has no document

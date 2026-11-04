@@ -99,6 +99,7 @@ impl Fixture {
             cwd: self.cwd.clone(),
             dict_dir: self.dict_dir.clone(),
             launch: &launch,
+            terminal: Default::default(),
         };
         let mut stdin = stdin;
         let mut captured = Vec::new();
@@ -171,7 +172,7 @@ fn la_ayuda_global_lista_los_comandos_en_stdout() {
     let out = fx.run(&["--help"]);
     assert_eq!(out.code, 0);
     assert!(out.stdout.contains("Usage: elision"), "{}", out.stdout);
-    for command in ["export", "stats", "tables", "spell", "open"] {
+    for command in ["export", "stats", "tables", "spell", "open", "view"] {
         assert!(
             out.stdout.contains(command),
             "falta {command}: {}",
@@ -303,6 +304,41 @@ fn stats_en_texto_es_una_metrica_por_linea() {
         )
     );
     assert_eq!(out.stderr, "");
+}
+
+// --- view ---
+
+#[test]
+fn view_dibuja_el_documento_ajustado_y_sin_color_fuera_de_una_terminal() {
+    let fx = fixture("view-text");
+    fx.file("doc.md", "# Título\n\nUn párrafo con **negrita** y bastante texto para que se ajuste.\n\n- uno\n- dos\n");
+    let out = fx.run(&["view", "doc.md", "--width", "30"]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(!out.stdout.contains('\x1b'), "sin terminal no hay color");
+    assert_eq!(
+        out.stdout,
+        "# Título\n\nUn párrafo con negrita y\nbastante texto para que se\najuste.\n\n• uno\n• dos\n"
+    );
+    assert_eq!(out.stderr, "");
+}
+
+#[test]
+fn view_en_json_trae_el_texto_plano() {
+    let fx = fixture("view-json");
+    let out = fx.run_stdin(&["view", "-", "--json"], b"Hola *mundo*");
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let json = out.json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["file"], Value::Null);
+    assert_eq!(json["text"], "Hola mundo\n");
+}
+
+#[test]
+fn view_de_un_archivo_que_no_existe_es_un_error_de_entrada_salida() {
+    let fx = fixture("view-missing");
+    let out = fx.run(&["view", "no-existe.md"]);
+    assert_eq!(out.code, 5);
+    assert_eq!(out.stdout, "");
 }
 
 // --- tables (3.8) ---

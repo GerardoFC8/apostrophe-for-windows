@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 use apostrophe_cli::commands::open::launch_detached;
 use apostrophe_cli::error::CliError;
+use apostrophe_cli::terminal::Terminal;
 use apostrophe_cli::{run, startup_failure, Env, Io, DICT_DIR_VAR};
 
 fn main() {
@@ -50,5 +51,6 @@ fn environment() -> Result<Env<'static>, CliError> {
         cwd,
         dict_dir: std::env::var_os(DICT_DIR_VAR).map(PathBuf::from),
         launch: &launch_detached,
+        terminal: Terminal::detect(),
     })
 }
