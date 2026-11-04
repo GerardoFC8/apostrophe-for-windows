@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d3846"/>
+      <stop offset="1" stop-color="#241f31"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
+  <g transform="translate(-30 4)">
+  <!-- "e" de trazo: travesaño y un arco abierto abajo a la derecha -->
+  <path fill="none" stroke="#ffffff" stroke-width="96" stroke-linecap="round"
+        d="M268 585 H612 A172 172 0 1 0 568 700"/>
+  <!-- apóstrofo de la elisión, en el color de acento -->
+  <path fill="#f6d32d" d="M742 250 A78 78 0 0 1 820 328 C820 425 768 488 680 522 C716 486 731 452 728 410 A78 78 0 0 1 742 250 Z"/>
+  </g>
+</svg>
