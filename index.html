@@ -84,6 +84,14 @@
            entre ellos; estos botones permiten el clic directo. SVG inline (sin fuente de iconos)
            coherente con el resto del chrome. El boton activo se resalta via aria-pressed (CSS). -->
       <div class="view-control" role="group" data-i18n-aria-label="view.group">
+        <!-- Panel de esquema (títulos del documento). Ctrl+Shift+O. -->
+        <button class="bar-btn view-btn" id="outline-btn" type="button" data-i18n-title="outline.toggle" aria-pressed="false">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 3.5 H9 M5 8 H12 M5 12.5 H12" />
+            <path d="M2.5 6 V12.5" />
+          </svg>
+        </button>
+        <span class="view-sep" aria-hidden="true"></span>
         <button class="bar-btn view-btn" data-view="editor" type="button" data-i18n-title="view.editor" aria-pressed="false">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="2" width="10" height="12" rx="1.5" />
@@ -152,6 +160,12 @@
         <button id="keep-btn" class="bar-btn" type="button" data-i18n="external.keep"></button>
       </div>
     </div>
+    <div class="workspace">
+    <!-- Esquema del documento: lo llena outline.ts. -->
+    <aside id="outline" class="outline" hidden>
+      <h2 class="outline-title" data-i18n="outline.title"></h2>
+      <nav id="outline-list" class="outline-list" data-i18n-aria-label="outline.title"></nav>
+    </aside>
     <main class="split">
       <div id="editor" class="editor" role="tabpanel"></div>
       <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
@@ -159,6 +173,7 @@
            deja correr MathJax. -->
       <iframe id="preview" class="preview" data-i18n-title="view.previewFrame" sandbox="allow-scripts"></iframe>
     </main>
+    </div>
     <!-- Los contadores los rellena updateStats (main.ts) con las formas plurales del
          catálogo; arrancan vacíos para no mostrar un idioma equivocado antes del primer
          render. -->
@@ -225,6 +240,7 @@
             <dl class="shortcuts-list">
               <dt data-i18n="shortcuts.cycleView"></dt><dd><kbd>Ctrl</kbd>+<kbd>P</kbd></dd>
               <dt data-i18n="shortcuts.fullscreen"></dt><dd><kbd>F11</kbd></dd>
+              <dt data-i18n="shortcuts.outline"></dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></dd>
               <dt data-i18n="shortcuts.zoomIn"></dt><dd><kbd>Ctrl</kbd>+<kbd>+</kbd></dd>
               <dt data-i18n="shortcuts.zoomOut"></dt><dd><kbd>Ctrl</kbd>+<kbd>-</kbd></dd>
               <dt data-i18n="shortcuts.zoomReset"></dt><dd><kbd>Ctrl</kbd>+<kbd>0</kbd></dd>

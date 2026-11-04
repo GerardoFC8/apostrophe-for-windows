@@ -182,6 +182,10 @@ export interface Messages {
   "shortcuts.zoomIn": string;
   "shortcuts.zoomOut": string;
   "shortcuts.zoomReset": string;
+  "shortcuts.outline": string;
+  "outline.title": string;
+  "outline.toggle": string;
+  "outline.empty": string;
   "shortcuts.focus": string;
   "shortcuts.hemingway": string;
   "shortcuts.toggleSpellcheck": string;
@@ -348,6 +352,10 @@ const ES: Messages = {
   "shortcuts.zoomIn": "Ampliar el texto (también Ctrl + rueda)",
   "shortcuts.zoomOut": "Reducir el texto",
   "shortcuts.zoomReset": "Tamaño normal",
+  "shortcuts.outline": "Esquema de títulos",
+  "outline.title": "Esquema",
+  "outline.toggle": "Esquema de títulos (Ctrl+Shift+O)",
+  "outline.empty": "El documento no tiene títulos.",
   "shortcuts.focus": "Enfoque",
   "shortcuts.hemingway": "Hemingway",
   "shortcuts.toggleSpellcheck": "Activar o desactivar el corrector",
@@ -515,6 +523,10 @@ const EN: Messages = {
   "shortcuts.zoomIn": "Larger text (also Ctrl + wheel)",
   "shortcuts.zoomOut": "Smaller text",
   "shortcuts.zoomReset": "Normal size",
+  "shortcuts.outline": "Outline",
+  "outline.title": "Outline",
+  "outline.toggle": "Outline (Ctrl+Shift+O)",
+  "outline.empty": "The document has no headings.",
   "shortcuts.focus": "Focus",
   "shortcuts.hemingway": "Hemingway",
   "shortcuts.toggleSpellcheck": "Turn the spell checker on or off",

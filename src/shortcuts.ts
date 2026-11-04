@@ -16,7 +16,7 @@ export function initFileShortcuts(): void {
   window.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
-    if (k === "o") {
+    if (k === "o" && !e.shiftKey) {
       e.preventDefault();
       void openDoc();
     } else if (k === "s" && e.shiftKey) {

@@ -6,14 +6,18 @@ import { view, getText } from "./editor";
 import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
 import { getLocale, t } from "./i18n";
+import { renderMermaid } from "./mermaid-diagrams";
 import { FRAME_SCRIPT, frameMessage } from "./preview-frame";
 import type { FrameMessage } from "./preview-frame";
+import type { SyncPosition } from "./scroll-sync";
 
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 
 // Ultimo HTML crudo de pandoc, para re-tematizar el preview al cambiar de tema sin
 // volver a invocar pandoc.
 let lastPreviewHtml = "";
+// Lo que se muestra: el HTML de pandoc con los diagramas Mermaid ya dibujados.
+let lastShownHtml = "";
 
 // CSS del preview derivado de las CSS vars del tema activo (una sola fuente de verdad).
 // Reglas del markdown renderizado, parametrizadas por la paleta. Las comparten el
@@ -31,6 +35,9 @@ function markdownStylesheet(v: (name: string) => string): string {
     blockquote{border-left:3px solid ${v("--border")};margin-left:0;padding-left:1em;opacity:.85;}
     h1,h2,h3{line-height:1.25;}
     img{max-width:100%;}
+    .mermaid-diagram{margin:1em 0;text-align:center;}
+    .mermaid-diagram svg{max-width:100%;height:auto;}
+    .mermaid-error-message{margin-top:-.4em;color:#e01b24;font-size:.85em;}
   </style>${syntaxStylesheet(v)}`;
 }
 
@@ -119,10 +126,16 @@ export interface PreviewFrameDeps {
   openMarkdown: (path: string) => Promise<void>;
   zoomStep: (step: 1 | -1 | 0) => void;
   zoomWheel: (deltaY: number) => void;
+  /** La vista previa se recargó y espera la posición del scroll sincronizado. */
+  onReady: () => void;
+  /** La vista previa se desplazó (a mano o por la sincronización): su posición actual. */
+  onScrolled: (pos: SyncPosition) => void;
 }
 
 function handleFrameMessage(msg: FrameMessage, deps: PreviewFrameDeps): void {
-  if (msg.kind === "link") void followLink(msg.href, deps.openMarkdown);
+  if (msg.kind === "ready") deps.onReady();
+  else if (msg.kind === "scrolled") deps.onScrolled(msg.pos);
+  else if (msg.kind === "link") void followLink(msg.href, deps.openMarkdown);
   else if (msg.kind === "zoom") deps.zoomStep(msg.step);
   else deps.zoomWheel(msg.deltaY);
 }
@@ -135,16 +148,36 @@ export function initPreviewFrame(deps: PreviewFrameDeps): void {
     const msg = frameMessage(e, preview);
     if (msg) handleFrameMessage(msg, deps);
   });
-  void listen<FrameMessage>("preview-frame", (event) => handleFrameMessage(event.payload, deps));
+  // La ventana desacoplada atiende su propio "listo" y su propia posición (ver
+  // preview-window.ts): su scroll es independiente del panel.
+  void listen<FrameMessage>("preview-frame", (event) => {
+    const kind = event.payload.kind;
+    if (kind !== "ready" && kind !== "scrolled") handleFrameMessage(event.payload, deps);
+  });
+}
+
+/// Manda la posición del scroll sincronizado a la vista previa y a la ventana desacoplada.
+export function postSync(pos: SyncPosition): void {
+  preview.contentWindow?.postMessage({ elisionSync: pos }, "*");
+  void emit("preview-sync", pos);
+}
+
+// Dibuja los diagramas Mermaid de `html` (con el tema activo) y lo muestra. `seq` descarta el
+// resultado si mientras tanto se pidió otro render.
+async function show(html: string, seq: number): Promise<void> {
+  const dark = document.documentElement.dataset.theme === "dark";
+  const shown = await renderMermaid(html, dark);
+  if (seq !== renderSeq) return;
+  lastShownHtml = shown;
+  preview.srcdoc = withTheme(shown);
+  pushToPreviewWindow(); // M18: si hay ventana desacoplada, se actualiza con el mismo HTML
 }
 
 // Re-tematizar el preview ya renderizado (editor/chrome se actualizan solos via vars).
-// Lo llama applyTheme (theme.ts) al cambiar de tema.
+// Lo llama applyTheme (theme.ts) al cambiar de tema, y el zoom. Los diagramas Mermaid se
+// vuelven a dibujar con los colores del tema (los que no cambian salen de la caché).
 export function refreshPreviewTheme(): void {
-  if (lastPreviewHtml) {
-    preview.srcdoc = withTheme(lastPreviewHtml);
-    pushToPreviewWindow(); // el HTML no cambio, pero si la hoja de estilos del tema
-  }
+  if (lastPreviewHtml) void show(lastPreviewHtml, ++renderSeq);
 }
 
 // Escapa HTML para no inyectar markup al mostrar errores en el iframe del preview.
@@ -165,8 +198,7 @@ export async function render(): Promise<void> {
     const html = await invoke<string>("preview_markdown", { text: getText(), docId: activeDocId() });
     if (seq !== renderSeq) return; // llego tarde: ya se pidio otro
     lastPreviewHtml = html;
-    preview.srcdoc = withTheme(html);
-    pushToPreviewWindow(); // M18: si hay ventana desacoplada, se actualiza con el mismo HTML
+    await show(html, seq);
   } catch (err) {
     if (seq !== renderSeq) return;
     flashStatus(t("status.previewFailed"), 4000);
@@ -190,9 +222,9 @@ export interface PreviewPayload {
 // Manda el HTML actual a la ventana desacoplada. Se emite SIEMPRE, aunque no haya ventana:
 // un evento sin destinatario no cuesta nada y evita tener que rastrear si esta abierta.
 function pushToPreviewWindow(): void {
-  if (!lastPreviewHtml) return;
+  if (!lastShownHtml) return;
   const payload: PreviewPayload = {
-    html: withTheme(lastPreviewHtml),
+    html: withTheme(lastShownHtml),
     background: getComputedStyle(document.documentElement).getPropertyValue("--preview-bg").trim(),
     locale: getLocale(),
   };

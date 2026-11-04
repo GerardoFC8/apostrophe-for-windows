@@ -12,6 +12,7 @@ import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { frameMessage } from "./preview-frame";
 import type { PreviewPayload } from "./preview";
+import type { SyncPosition } from "./scroll-sync";
 import { LOCALES, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
 import { getSetting, setSetting } from "./settings";
@@ -99,7 +100,23 @@ void emit("preview-window-ready");
 // initPreviewFrame).
 window.addEventListener("message", (e) => {
   const msg = frameMessage(e, frame);
-  if (msg) void emit("preview-frame", msg);
+  if (!msg) return;
+  if (msg.kind === "ready") postSync();
+  else if (msg.kind === "scrolled") lastSync = msg.pos; // se restaura si el iframe se recarga
+  else void emit("preview-frame", msg);
+});
+
+// Scroll sincronizado: la ventana principal manda la posición del editor; se guarda para
+// reenviarla cada vez que el iframe se recarga.
+let lastSync: SyncPosition | null = null;
+
+function postSync(): void {
+  if (lastSync) frame.contentWindow?.postMessage({ elisionSync: lastSync }, "*");
+}
+
+void listen<SyncPosition>("preview-sync", (event) => {
+  lastSync = event.payload;
+  postSync();
 });
 
 // Fuera del iframe (sobre los controles) Ctrl + rueda y Ctrl + / - / 0 llegan a esta página:

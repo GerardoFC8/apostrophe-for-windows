@@ -28,6 +28,10 @@ with **Tauri 2 + Rust** on a hexagonal architecture
 - Images: **paste with Ctrl+V** (saved in an `assets` folder next to the document) or
   **drag them** onto the window. Dragging a `.md` opens it in a tab.
 - **Text zoom** with `Ctrl +` / `Ctrl -` / `Ctrl 0` or `Ctrl` + mouse wheel.
+- **Outline** in a side panel (`Ctrl+Shift+O`): click to jump to a section.
+- **Synced scrolling**: the preview follows the editor, heading by heading.
+- **Mermaid diagrams**: a ` ```mermaid ` block is drawn as a diagram in the preview, with no
+  internet connection.
 - Preview in a separate window, with **background opacity** and **always on top** (the
   controls appear when the mouse is over the window).
 - `elision` CLI for AI agents and scripts, plus `elision view` to read a document formatted

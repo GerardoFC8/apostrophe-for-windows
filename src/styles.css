@@ -389,11 +389,85 @@ body {
   color: #fff;
 }
 
+/* Esquema + editor/vista previa, uno al lado del otro. */
+.workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 .split {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 0;
+  min-width: 0;
+}
+
+/* Panel de esquema (outline.ts). */
+.outline {
+  width: 240px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+.outline[hidden] {
+  display: none;
+}
+.outline-title {
+  margin: 0;
+  padding: 0.7rem 0.9rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.outline-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0.35rem 0.6rem;
+}
+.outline-item {
+  display: block;
+  width: 100%;
+  padding: 0.28rem 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+  cursor: default;
+}
+.outline-item:hover {
+  background: var(--hover);
+  opacity: 1;
+}
+.outline-item.active {
+  background: var(--selection);
+  opacity: 1;
+}
+.outline-empty {
+  margin: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  opacity: 0.55;
+}
+
+/* Separa el botón de esquema de los de modo de vista. */
+.view-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--border);
+  align-self: center;
 }
 
 /* Host de CodeMirror 6: la tipografia/padding/colores los pone el tema del editor
@@ -715,6 +789,10 @@ body {
 /* Distraction-free: oculta el preview y centra el editor en un ancho de lectura cómodo;
    atenúa el chrome (titlebar/statusbar), recuperable al pasar el mouse. La clase la pone
    y la saca el JS (toggleFocusMode); todo es reversible al salir. */
+/* El enfoque esconde el esquema: es parte del "sin distracciones". */
+body.focus-mode .outline {
+  display: none;
+}
 body.focus-mode .split {
   grid-template-columns: 1fr; /* el editor toma todo el ancho (preview oculto) */
 }

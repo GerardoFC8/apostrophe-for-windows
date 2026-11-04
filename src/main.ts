@@ -19,6 +19,7 @@ import { activeDocId } from "./tabs";
 import { initTabBar } from "./tab-bar";
 import {
   initPreviewFrame,
+  postSync,
   initPreviewWindow,
   initViewMode,
   refreshPreviewTheme,
@@ -26,6 +27,13 @@ import {
 } from "./preview";
 import { initFileDrop } from "./file-drop";
 import { initZoom, zoomStep, zoomWheel } from "./zoom";
+import { initOutline, onSelectionChanged, updateOutline } from "./outline";
+import {
+  initScrollSync,
+  rememberPreviewPosition,
+  resendSync,
+  syncToHeading,
+} from "./scroll-sync";
 import { updateStats } from "./stats";
 import { applyTheme, buildThemeMenu, getInitialTheme, initThemeMenu } from "./theme";
 import { alignTableAtCursor, initExportButton, pasteImage } from "./commands";
@@ -59,6 +67,7 @@ let timer: number | undefined;
 function updateDerived(): void {
   void render();
   void updateStats();
+  void updateOutline(); // esquema de títulos (y referencia del scroll sincronizado)
   void syncDoc();
   // M11.1: solo pedir el corrector si esta activado. Si esta apagado no pedimos nada
   // (las ondulitas ya quedaron limpias al togglear); el resaltado es independiente.
@@ -93,7 +102,13 @@ initFileShortcuts(); // M4/M5: Ctrl+O/S/Shift+S/E/N
 initPreviewWindow(); // M18: ventana de vista previa desacoplada
 // Vista previa: enlaces (web, otros .md en pestañas, archivos en el Explorador) y zoom con el
 // foco o el mouse sobre ella.
-initPreviewFrame({ openMarkdown: openPath, zoomStep, zoomWheel });
+initPreviewFrame({
+  openMarkdown: openPath,
+  zoomStep,
+  zoomWheel,
+  onReady: resendSync,
+  onScrolled: rememberPreviewPosition,
+});
 initFileDrop(openPath); // soltar archivos: .md en pestañas, imágenes en el texto
 void initZoom(refreshPreviewTheme); // Ctrl + / Ctrl - / Ctrl 0 y Ctrl + rueda
 initThemeMenu(); // M5: selector de tema
@@ -114,7 +129,10 @@ createEditor({
   onAlignTable: alignTableAtCursor,
   currentDocId: activeDocId,
   onPasteImage: (image) => void pasteImage(image),
+  onSelectionChanged,
 });
+initScrollSync(postSync); // la vista previa acompaña al editor, título por título
+void initOutline(syncToHeading); // panel de esquema (Ctrl+Shift+O)
 initDocumentSession({ onActiveDocChanged: refreshActiveDocument });
 initTabBar(); // barra de pestañas (se repinta sola con cada cambio de la coleccion)
 
@@ -124,6 +142,7 @@ applyTheme(getInitialTheme()); // fija el tema antes del primer render (sin flas
 initLanguage();
 void render();
 void updateStats();
+void updateOutline();
 loadSpellcheckPreference(); // M11.1: arranque sin parpadeo (ver writing-modes.ts)
 void requestMarkupHighlight(view, getText()); // M10: resaltado inicial (al abrir/restaurar)
 initSpellDictListener();

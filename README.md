@@ -25,6 +25,10 @@ Editor de Markdown nativo, minimalista y libre de distracciones para Windows (an
 - Imágenes: **pegar con Ctrl+V** (se guardan en la carpeta `assets` junto al documento) o
   **arrastrarlas** a la ventana. Arrastrar un `.md` lo abre en una pestaña.
 - **Zoom del texto** con `Ctrl +` / `Ctrl -` / `Ctrl 0` o `Ctrl` + rueda del mouse.
+- **Esquema de títulos** en un panel lateral (`Ctrl+Shift+O`): clic para saltar a la sección.
+- **Scroll sincronizado**: la vista previa acompaña al editor, título por título.
+- **Diagramas Mermaid**: un bloque ` ```mermaid ` se dibuja como diagrama en la vista previa,
+  sin conexión a internet.
 - Vista previa en una ventana aparte, con **opacidad del fondo** y **siempre visible**
   (los controles aparecen al pasar el mouse por la ventana).
 - CLI `elision` para agentes de IA y scripts, y `elision view` para leer un documento con
