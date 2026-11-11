@@ -4,52 +4,113 @@
 
 # Elision
 
-A native, minimal, distraction-free Markdown editor for Windows (formerly
-*Apostrophe for Windows*). A native port of GNOME's
-[Apostrophe](https://gitlab.gnome.org/World/apostrophe), built
-with **Tauri 2 + Rust** on a hexagonal architecture
-(see [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
+**A simple, distraction-free Markdown editor for Windows.** You write on the left, see the
+result on the right, and export to PDF, Word and other formats without installing anything
+else.
 
-> The application interface is available in Spanish and English. This document is the
-> English translation of the project README.
+Elision (formerly *Apostrophe for Windows*) is a native Windows version of GNOME's
+[Apostrophe](https://gitlab.gnome.org/World/apostrophe) editor. It is free and open source.
 
-## Features
+[Installation](#installation) · [What you can do](#what-you-can-do) ·
+[Shortcuts](#keyboard-shortcuts) · [Tabs](#tabs) ·
+[Command line](#cli-for-agents-elision) ·
+[Troubleshooting](#troubleshooting) · [Development](#development)
 
-- CodeMirror 6 editor with a custom Fluent title bar.
-- Live preview via **pandoc** (bundled as a sidecar — no system dependencies).
-- Open and save `.md` through native dialogs.
-- Several documents open at once, each in its own tab (see [Tabs](#tabs)).
+## Installation
+
+Open PowerShell or the Windows terminal and run:
+
+```powershell
+winget install elision
+```
+
+That's it. No administrator rights needed: the app is installed for your user only.
+[winget](https://learn.microsoft.com/windows/package-manager/winget/) is the package
+manager that ships with Windows 10 and 11.
+
+To upgrade or uninstall:
+
+```powershell
+winget upgrade elision
+winget uninstall elision
+```
+
+**Prefer to download the installer?** Get `Elision_<version>_x64-setup.exe` from
+[Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) and run it.
+The newest version is always there; the winget one may take a few days to catch up.
+Windows will show the
+["Windows protected your PC"](#windows-protected-your-pc) notice: this is normal.
+
+**Requirements:** Windows 10 or later with the WebView2 Runtime, which is preinstalled on
+modern Windows 10 and 11.
+
+> **Did you have Apostrophe for Windows (0.3.0 or earlier)?** Uninstall it before installing
+> Elision: because of the rename, Elision installs as a separate app and does not replace it.
+> Your preferences and recent files are kept.
+>
+> ```powershell
+> winget uninstall GerardoFC8.ApostropheForWindows
+> winget install elision
+> ```
+
+`elision` is the package's short name. Its full identifier, which also works in all these
+commands, is `GerardoFC8.ApostropheForWindows`: it is kept from the app's former name so that
+existing users keep getting updates.
+
+## What you can do
+
+**Write**
+
+- Several documents open at once, each in its own [tab](#tabs).
 - Light, dark and sepia themes.
-- Export to **PDF, HTML, ODT, DOCX, EPUB and LaTeX** (Ctrl+E) — pick the format from the
-  dialog's "Save as type" dropdown. The bundled sidecars (pandoc and typst) handle
-  everything: nothing else to install.
-- Spanish spell checking (Hunspell via `spellbook`, pure Rust), with a personal dictionary:
-  right-click an underlined word → **Add to dictionary**.
-- Images: **paste with Ctrl+V** (saved in an `assets` folder next to the document) or
-  **drag them** onto the window. Dragging a `.md` opens it in a tab.
 - **Text zoom** with `Ctrl +` / `Ctrl -` / `Ctrl 0` or `Ctrl` + mouse wheel.
 - **Outline** in a side panel (`Ctrl+Shift+O`): click to jump to a section.
-- **Synced scrolling**: the preview follows the editor, heading by heading.
-- **Mermaid diagrams**: a ` ```mermaid ` block is drawn as a diagram in the preview, with no
-  internet connection.
-- Preview in a separate window, with **background opacity** and **always on top** (the
-  controls appear when the mouse is over the window).
-- `elision` CLI for AI agents and scripts, plus `elision view` to read a document formatted
-  in the terminal (see [CLI for agents](#cli-for-agents-elision)).
+- **Spanish spell checking**, with a personal dictionary: right-click an underlined word →
+  **Add to dictionary**.
+- **Images:** paste them with `Ctrl+V` (saved in an `assets` folder next to the document) or
+  drag them onto the window. Dragging a `.md` opens it in a tab.
 
-## Tabs
+**See the result**
 
-Each Markdown document opens in its own tab, and you can keep several open at once.
+- **Live preview** as you type.
+- **Synced scrolling:** the preview follows the editor, heading by heading.
+- **Mermaid diagrams:** a ` ```mermaid ` block is drawn as a diagram, with no internet
+  connection.
+- **Preview in a separate window**, with background opacity and an option to keep it always
+  on top (the controls appear when the mouse is over the window).
+
+**Export**
+
+- To **PDF, HTML, ODT, DOCX, EPUB and LaTeX** with `Ctrl+E`. Pick the format from the
+  dialog's "Save as type" dropdown.
+- The conversion engines (pandoc and typst) are bundled: there is nothing else to install.
+
+**Automate**
+
+- The [`elision`](#cli-for-agents-elision) command lets you export, count words, check
+  spelling and align tables from the terminal, built for scripts and AI agents.
+  `elision view` shows a formatted document in the terminal.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+O` | Open a file |
+| `Ctrl+T` or `Ctrl+N` | New tab with an untitled document |
+| `Ctrl+W` | Close the active tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+E` | Export |
+| `Ctrl+Shift+O` | Show or hide the outline |
+| `Ctrl+Shift+H` | Hemingway mode |
+| `Ctrl +` / `Ctrl -` / `Ctrl 0` | Zoom the text in, out and back to default |
+| `Ctrl+V` | Paste an image from the clipboard |
 
 > **Shortcut change:** Hemingway mode moved from `Ctrl+T` to **`Ctrl+Shift+H`**. `Ctrl+T`
 > now opens a new tab, as in any tabbed program.
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+T` or `Ctrl+N` | New tab with an untitled document |
-| `Ctrl+W` | Close the active tab |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
-| `Ctrl+Shift+H` | Hemingway mode |
+## Tabs
+
+Each Markdown document opens in its own tab, and you can keep several open at once.
 
 **Tab bar**
 
@@ -83,69 +144,23 @@ The preview (including the detached window) and the statistics follow the active
 - "Save as" onto a file that is already open in another tab is refused with a notice: close
   that tab or choose another name.
 
-## Installation
-
-The easiest way is with [winget](https://learn.microsoft.com/windows/package-manager/winget/),
-the package manager that ships with Windows 10 and 11. From PowerShell or the terminal:
-
-```powershell
-winget install elision
-```
-
-No administrator rights needed: the app is installed for your user only.
-
-To upgrade or uninstall:
-
-```powershell
-winget upgrade elision
-winget uninstall elision
-```
-
-`elision` is the package's short name. Its full identifier, which also works in all these
-commands, is `GerardoFC8.ApostropheForWindows`: it is kept from the app's former name so that
-existing users keep getting updates.
-
-> **Did you have Apostrophe for Windows (0.3.0 or earlier)?** Uninstall it before installing
-> Elision: because of the rename, Elision installs as a separate app and does not replace it.
-> Your preferences and recent files are kept.
->
-> ```powershell
-> winget uninstall GerardoFC8.ApostropheForWindows
-> winget install elision
-> ```
-
-> The winget version may take a few days to catch up with the latest release. For the
-> newest one, download `Elision_<version>_x64-setup.exe` from
-> [Releases](https://github.com/GerardoFC8/apostrophe-for-windows/releases) and run it
-> (see ["Windows protected your PC"](#windows-protected-your-pc--this-is-normal)).
-
 ## CLI for agents (`elision`)
 
 The installer also puts the **`elision`** command on the PATH: a CLI for AI agents and
 scripts. It uses the same pandoc, typst and dictionary as the app, never asks for
-confirmation, and its output is stable. The contract is the **exit codes and error codes**;
-messages are in English and are only diagnostics.
-
-> **Why `elision`?** An *elision* is the omission of a sound or letter when two words are
-> joined (*do not* → *don't*, *le arbre* → *l'arbre*), and in writing it is marked with an
-> **apostrophe**. In other words, the mark the original Apostrophe is named after exists to
-> signal an elision. Hence the app's name; the CLI is also the editor without its interface:
-> what is left once it is cut down.
-
-> After installing, **fully close** Windows Terminal, VS Code or whatever program you open
-> your terminal from, and start it again. A new tab is not enough: it inherits the PATH that
-> program had when it started, so neither the tab nor the agents running in it will find
-> `elision`. If you would rather not close it, reload the PATH in the current tab:
->
-> ```powershell
-> $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-> ```
+confirmation, and its output is stable.
 
 ```powershell
 elision --help
 elision stats notes.md --json
 elision export notes.md -o notes.pdf
 ```
+
+The contract is the **exit codes and error codes**; messages are in English and are only
+diagnostics.
+
+> Does the terminal say it does not recognize `elision` right after installing? See
+> ["The `elision` command is not recognized"](#the-elision-command-is-not-recognized).
 
 ### Commands
 
@@ -222,15 +237,60 @@ elision export docs\chapter.md -o C:\out\chapter.pdf --json
   They are listed in the JSON `skipped` field (`escaped_pipe`, `extra_cells`, `mixed_indent`,
   `blockquote`) and as a warning on stderr; they do not change the exit code.
 - **HTML without a theme:** HTML export uses pandoc's default style, not the app's theme.
-- **Unsigned:** `elision.exe` is not signed either. Some antivirus products distrust new
-  unsigned executables and may block or quarantine it; if that happens, add an exception for
-  the installation folder.
+- **Unsigned:** `elision.exe` is not signed either; see
+  ["Antivirus blocks `elision.exe`"](#antivirus-blocks-elisionexe).
 
 During development, without installing: `cargo run -p apostrophe --bin elision -- --help`.
 The architecture is described in
 [`docs/adr/0002-cli-adaptador-primario.md`](docs/adr/0002-cli-adaptador-primario.md).
 
-## Development requirements
+## Troubleshooting
+
+### "Windows protected your PC"
+
+When you run the downloaded installer, Windows SmartScreen shows a blue screen: **"Windows
+protected your PC — Unknown publisher"**. This is **expected and completely harmless**: it
+only means Windows does not recognise the binary's publisher, not that the app is unsafe.
+To continue:
+
+1. Click **"More info"**.
+2. Click **"Run anyway"**.
+
+The app installs and runs normally.
+
+The installer is **not signed**, and that is a deliberate choice: this is a free, personal
+project, not a commercial one. A code-signing certificate costs roughly $200–400 a year
+and does not make the app any safer or better — it only removes one click of friction for
+whoever downloads it. This is how thousands of open-source Windows applications are
+distributed.
+
+### The `elision` command is not recognized
+
+After installing, **fully close** Windows Terminal, VS Code or whatever program you open
+your terminal from, and start it again. A new tab is not enough: it inherits the PATH that
+program had when it started, so neither the tab nor the agents running in it will find
+`elision`.
+
+If you would rather not close it, reload the PATH in the current tab:
+
+```powershell
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+```
+
+### Antivirus blocks `elision.exe`
+
+`elision.exe` is not signed either. Some antivirus products distrust new unsigned
+executables and may block or quarantine it; if that happens, add an exception for the
+installation folder.
+
+## Development
+
+Elision is built with **Tauri 2 + Rust** on a hexagonal architecture (see
+[`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
+The editor is CodeMirror 6, the preview and export use **pandoc** and **typst** as bundled
+sidecars, and the spell checker is Hunspell via `spellbook`, in pure Rust.
+
+### Requirements
 
 - [Rust](https://rustup.rs/) (MSVC toolchain on Windows: `x86_64-pc-windows-msvc`).
 - [Node.js](https://nodejs.org/) + [pnpm](https://pnpm.io/) (this project uses **pnpm**,
@@ -238,7 +298,7 @@ The architecture is described in
 - On Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
   (preinstalled on modern Windows 10/11).
 
-## Getting started (dev)
+### Getting started
 
 The large binaries (pandoc ~150 MB, typst ~21 MB) and the Hunspell dictionaries **are not
 committed**: they are gitignored and provisioned by scripts. Before your first
@@ -260,7 +320,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-## Release build (Windows installer)
+### Release build (Windows installer)
 
 > ⚠️ The **MSI installer must be built on Windows** (WiX only runs on Windows).
 > The NSIS installer (`setup.exe`) is produced in the same step.
@@ -280,7 +340,7 @@ pnpm tauri dev
    target/release/bundle/msi/Elision_<version>_x64_en-US.msi     # MSI (WiX)
    ```
 
-### Installer configuration
+#### Installer configuration
 
 Defined in `src-tauri/tauri.conf.json` (`bundle`):
 
@@ -297,27 +357,17 @@ Defined in `src-tauri/tauri.conf.json` (`bundle`):
   hand:
   `powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/windows/elision-path.tests.ps1`.
 
-### "Windows protected your PC" — this is normal
-
-The installer is **not signed**, and that is a deliberate choice: this is a free, personal
-project, not a commercial one. A code-signing certificate costs roughly $200–400 a year
-and does not make the app any safer or better — it only removes one click of friction for
-whoever downloads it. Not worth it for a hobby.
-
-During installation, Windows SmartScreen will show a blue screen: **"Windows protected
-your PC — Unknown publisher"**. This is **expected and completely harmless**: it only
-means Windows does not recognise the binary's publisher, not that the app is unsafe. To
-continue:
-
-1. Click **"More info"**.
-2. Click **"Run anyway"**.
-
-The app installs and runs normally. This is how thousands of open-source Windows
-applications are distributed.
-
-> If you ever wanted to remove the warning (for mass distribution, say), you would need an
-> OV/EV certificate — see
+> If you ever wanted to remove the SmartScreen warning (for mass distribution, say), you
+> would need an OV/EV certificate — see
 > [code signing in Tauri](https://v2.tauri.app/distribute/sign/windows/).
+
+## About the name
+
+An *elision* is the omission of a sound or letter when two words are joined (*do not* →
+*don't*, *le arbre* → *l'arbre*), and in writing it is marked with an **apostrophe**. In
+other words, the mark the original Apostrophe is named after exists to signal an elision.
+Hence the app's name; and the `elision` CLI is also the editor without its interface: what
+is left once it is cut down.
 
 ## License
 
