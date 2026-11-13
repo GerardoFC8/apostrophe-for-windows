@@ -1,6 +1,7 @@
 // Panel de esquema: los títulos del documento en una columna a la izquierda del editor. Un
 // clic lleva a la sección; la sección donde está el cursor se resalta. Se abre y cierra con
-// el botón de la barra o Ctrl+Shift+O, y se recuerda entre sesiones.
+// el botón de la barra o Ctrl+Shift+O, y se recuerda entre sesiones. Al desplazarse, el
+// resaltado acompaña a la sección que queda arriba (`markSection`).
 //
 // Los títulos los extrae el dominio (`outline`), con las mismas reglas que pandoc: así cada
 // entrada corresponde a un título de la vista previa, que es lo que usa también el scroll
@@ -79,11 +80,23 @@ function renderList(): void {
   });
 }
 
-// Resalta la sección del cursor y la mantiene a la vista dentro del panel.
+// Resalta la sección del cursor.
 function markActive(): void {
   if (panel.hidden) return;
   const line = view.state.doc.lineAt(view.state.selection.main.head).number - 1;
-  const index = sectionAt(line);
+  markIndex(sectionAt(line));
+}
+
+/// Resalta la sección que se está leyendo: la que quedó arriba al desplazar el editor o la
+/// vista previa (scroll-sync.ts y la vista previa la informan). El desplazamiento no mueve el
+/// cursor, así que sin esto el resaltado se quedaría donde se hizo el último clic.
+export function markSection(index: number): void {
+  if (panel.hidden) return;
+  markIndex(Math.min(index, headings.length - 1));
+}
+
+// Resalta la entrada `index` y la mantiene a la vista dentro del panel.
+function markIndex(index: number): void {
   if (index === active && list.querySelector(".outline-item.active")) return;
   active = index;
   list.querySelectorAll(".outline-item.active").forEach((el) => el.classList.remove("active"));

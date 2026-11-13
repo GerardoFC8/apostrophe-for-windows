@@ -6,7 +6,7 @@
 // existe igual en los dos lados (pandoc no informa de qué renglón sale cada párrafo), y entre
 // uno y otro la interpolación es suficiente para leer a la par.
 import { view } from "./editor";
-import { getHeadings, sectionAt } from "./outline";
+import { getHeadings, markSection, sectionAt } from "./outline";
 
 /// Posición a sincronizar. `index` es el título (-1 = antes del primero) y `fraction` cuánto
 /// se avanzó hacia el siguiente; `end` pide ir al final.
@@ -14,6 +14,8 @@ export interface SyncPosition {
   index: number;
   fraction: number;
   end?: boolean;
+  /** Solo en lo que informa la vista previa: la sección que se lee (para el esquema). */
+  section?: number;
 }
 
 let last: SyncPosition = { index: -1, fraction: 0 };
@@ -46,7 +48,29 @@ function onScroll(): void {
     pending = false;
     last = compute();
     send(last);
+    markSection(last.end ? getHeadings().length - 1 : sectionInView());
   });
+}
+
+// Qué sección se está leyendo: la del título que ya entró en el primer quinto de la vista
+// (como mínimo 48 px, para que cuente un título puesto arriba por el esquema). Con solo el
+// borde superior, un título visible pero no pegado arriba seguiría marcando la anterior. La
+// vista previa usa la misma regla (preview-frame.ts).
+function readingOffset(height: number): number {
+  return Math.max(48, height * 0.2);
+}
+
+function sectionInView(): number {
+  const dom = view.scrollDOM;
+  const height = Math.max(0, dom.scrollTop - view.documentPadding.top + readingOffset(dom.clientHeight));
+  const block = view.lineBlockAtHeight(height);
+  return sectionAt(view.state.doc.lineAt(block.from).number - 1);
+}
+
+// El esquema resalta la sección que se lee en la vista previa (`section`, con la misma regla
+// que el editor). Al final del documento es la última.
+function showSection(pos: SyncPosition): void {
+  markSection(pos.end ? getHeadings().length - 1 : (pos.section ?? pos.index));
 }
 
 // El editor se ve (vista dividida o solo editor). Con la vista previa sola está oculto y su
@@ -64,9 +88,11 @@ export function resendSync(): void {
 }
 
 /// La vista previa informa dónde quedó: es lo que se restaura si se recarga sin que el editor
-/// se haya movido (por ejemplo, desplazándola a mano con la vista previa sola).
+/// se haya movido (por ejemplo, desplazándola a mano con la vista previa sola). También mueve
+/// el resaltado del esquema, que con la vista previa sola es la única pista de dónde se está.
 export function rememberPreviewPosition(pos: SyncPosition): void {
   last = pos;
+  showSection(pos);
 }
 
 /// Lleva la vista previa al título `index` (el esquema, cuando solo se ve la vista previa).

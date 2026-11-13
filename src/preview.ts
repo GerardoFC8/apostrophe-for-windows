@@ -156,10 +156,14 @@ export function initPreviewFrame(deps: PreviewFrameDeps): void {
   });
 }
 
+// La ventana desacoplada está (o pudo quedar) abierta. Mientras no, la posición no se emite:
+// el scroll sincronizado manda una por cuadro y cada `emit` es un viaje por IPC.
+let previewWindowOpen = false;
+
 /// Manda la posición del scroll sincronizado a la vista previa y a la ventana desacoplada.
 export function postSync(pos: SyncPosition): void {
   preview.contentWindow?.postMessage({ elisionSync: pos }, "*");
-  void emit("preview-sync", pos);
+  if (previewWindowOpen) void emit("preview-sync", pos);
 }
 
 // Dibuja los diagramas Mermaid de `html` (con el tema activo) y lo muestra. `seq` descarta el
@@ -234,6 +238,7 @@ function pushToPreviewWindow(): void {
 async function togglePreviewWindow(): Promise<void> {
   try {
     const open = await invoke<boolean>("toggle_preview_window");
+    previewWindowOpen = open;
     previewWindowBtn.setAttribute("aria-pressed", String(open));
     if (open) pushToPreviewWindow();
   } catch (err) {
@@ -246,13 +251,19 @@ export function initPreviewWindow(): void {
   // La ventana recien abierta puede tardar en montar su listener, y la principal quiza lleve
   // rato sin renderizar: cuando avisa que esta lista, se le manda el HTML actual para que no
   // arranque en blanco.
-  void listen("preview-window-ready", () => pushToPreviewWindow());
+  void listen("preview-window-ready", () => {
+    previewWindowOpen = true;
+    pushToPreviewWindow();
+  });
 
   previewWindowBtn.addEventListener("click", () => void togglePreviewWindow());
   // Si la ventana quedo abierta de una sesion anterior (o de un recargar en dev), el boton
   // tiene que reflejarlo en vez de mentir.
   void invoke<boolean>("preview_window_open")
-    .then((open) => previewWindowBtn.setAttribute("aria-pressed", String(open)))
+    .then((open) => {
+      previewWindowOpen ||= open;
+      previewWindowBtn.setAttribute("aria-pressed", String(open));
+    })
     .catch(() => {});
 }
 
