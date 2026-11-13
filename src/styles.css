@@ -24,6 +24,10 @@
      y, con la app en oscuro, heredaria la paleta oscura. */
   --syntax-keyword: initial;
   --md-marker: rgba(46, 52, 54, 0.45); /* M10: marcadores de markup atenuados */
+  --scrollbar-thumb: rgba(46, 52, 54, 0.22);
+  --scrollbar-thumb-hover: rgba(46, 52, 54, 0.4);
+  --canvas: #ebebed;
+  --float-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="dark"] {
@@ -40,6 +44,10 @@
   --preview-fg: #deddda;
   --preview-code-bg: rgba(255, 255, 255, 0.08);
   --md-marker: rgba(222, 221, 218, 0.45);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --canvas: #1b1b1b;
+  --float-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
   /* Resaltado de codigo en la vista previa. Los colores de pandoc son para fondo claro (el
      azul de las funciones casi no se ve sobre gris oscuro): en este tema se reemplazan. Los
      temas claro y sepia no definen estas variables y se quedan con los de pandoc. */
@@ -72,10 +80,64 @@
      y, con la app en oscuro, heredaria la paleta oscura. */
   --syntax-keyword: initial;
   --md-marker: rgba(91, 70, 54, 0.5);
+  --scrollbar-thumb: rgba(91, 70, 54, 0.22);
+  --scrollbar-thumb-hover: rgba(91, 70, 54, 0.4);
+  --canvas: #e6dbc1;
+  --float-shadow: 0 8px 24px rgba(91, 70, 54, 0.18), 0 1px 3px rgba(91, 70, 54, 0.12);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Forma de la interfaz, común a los tres temas: el lienzo (--canvas) queda detrás y el
+   esquema, el editor y la vista previa son tarjetas encima; lo que flota (dock, menús,
+   avisos) es una píldora con sombra. Los derivados de --accent se resuelven en <html>, donde
+   cada tema pone el suyo. */
+:root {
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --gap: 8px;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  /* Alto que deja libre el dock abajo (su alto + su margen + el espacio entre tarjetas). */
+  --dock-space: 60px;
+  --chrome-fade: 220ms ease;
+}
+
+/* Fuera de la vista pero presente para lectores de pantalla. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Barras de desplazamiento: una píldora fina y sin carril, del color del tema. El borde
+   transparente con background-clip la separa del borde de la ventana. La vista previa
+   (iframe) repite estas reglas con los mismos tokens (preview.ts -> previewStyle). Ojo:
+   `scrollbar-width` o `scrollbar-color` en un elemento anulan estas reglas en Chromium. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  min-height: 40px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 html,
@@ -88,7 +150,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--chrome-fg);
   /* Inter Variable (≈ Adwaita Sans del GNOME actual). Fallbacks por si el bundle falla. */
   font-family: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -99,41 +161,58 @@ body {
   transition: background-color 150ms ease, color 150ms ease;
 }
 
-/* Titlebar custom (M3, decorations:false): chrome faux-native Windows. El header y
-   los textos son drag region (data-tauri-drag-region); los botones NO, para que el
-   click registre. Sin padding a la derecha: los botones caption van flush al borde. */
+/* Titlebar custom (M3, decorations:false): una sola fila con el menú, las pestañas y los
+   botones de ventana. El header y el espacio libre de la barra de pestañas son drag region
+   (data-tauri-drag-region); los botones NO, para que el clic registre. Sin padding a la
+   derecha: los botones caption van flush al borde. */
 .titlebar {
   display: flex;
   align-items: center;
-  height: 38px;
-  padding-left: 0.8rem;
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  height: 44px;
+  padding-left: 6px;
   font-size: 0.85rem;
   user-select: none;
 }
 
-.brand {
-  font-weight: 600;
+.titlebar > * {
+  transition: opacity var(--chrome-fade);
 }
 
-.doc-name {
-  margin-left: 0.6rem;
-  opacity: 0.85;
+/* Aviso de estado (status.ts): guardado, exportado, errores. Flota sobre el dock y solo se
+   ve mientras tiene texto. */
+.dock-status {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--dock-space) + 2px);
+  transform: translateX(-50%);
+  z-index: 16;
+  max-width: min(80vw, 520px);
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--float-shadow);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transition: bottom var(--chrome-fade);
 }
 
-.status {
-  opacity: 0.65;
-  margin-left: auto; /* empuja el resto al borde derecho */
-  margin-right: 0.6rem;
+.dock-status:empty {
+  display: none;
 }
 
-/* Botones de la titlebar (tema, export): chips sutiles antes de los controles. */
+/* Botones del chrome: chips sutiles. En el dock y en la titlebar pierden el borde (ver
+   .dock .bar-btn y .menu-trigger); el borde queda para los de la infobar de cambio externo. */
 .bar-btn {
   height: 24px;
   margin-right: 0.4rem;
   padding: 0 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -148,7 +227,6 @@ body {
 /* Selector de tema (desplegable con iconos). */
 .theme-select {
   position: relative;
-  margin-right: 0.4rem;
 }
 
 .theme-trigger {
@@ -168,15 +246,24 @@ body {
 
 .theme-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   right: 0;
   min-width: 150px;
-  padding: 4px;
+  padding: 6px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-card);
+  box-shadow: var(--float-shadow);
   z-index: 20;
+}
+
+/* En el dock los menús se abren hacia arriba. */
+.dock .theme-menu {
+  top: auto;
+  bottom: calc(100% + 10px);
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .theme-menu[hidden] {
@@ -190,7 +277,7 @@ body {
   width: 100%;
   padding: 0.4rem 0.5rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -225,14 +312,19 @@ body {
    vía la clase compartida en el HTML). El trigger es un .bar-btn solo-icono. */
 .menu-select {
   position: relative;
-  margin-right: 0.4rem;
+  flex: none;
 }
 
 .menu-trigger {
   display: inline-flex;
   align-items: center;
-  margin-right: 0; /* la margin la lleva .menu-select */
-  padding: 0 0.45rem;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  margin-right: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
 }
 
 .menu-trigger svg {
@@ -389,17 +481,22 @@ body {
   color: #fff;
 }
 
-/* Esquema + editor/vista previa, uno al lado del otro. */
+/* Esquema + editor/vista previa, uno al lado del otro, como tarjetas sobre el lienzo. Abajo
+   queda el espacio del dock (en modo zen se recupera). */
 .workspace {
   flex: 1;
   display: flex;
+  gap: var(--gap);
   min-height: 0;
+  padding: 0 var(--gap) var(--dock-space);
+  transition: padding-bottom var(--chrome-fade);
 }
 
 .split {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
   min-height: 0;
   min-width: 0;
 }
@@ -411,19 +508,27 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  transition:
+    width var(--chrome-fade),
+    opacity var(--chrome-fade),
+    margin var(--chrome-fade);
 }
 .outline[hidden] {
   display: none;
 }
 .outline-title {
   margin: 0;
-  padding: 0.7rem 0.9rem 0.4rem;
-  font-size: 0.72rem;
+  padding: 0.8rem 1rem 0.45rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  opacity: 0.6;
+  opacity: 0.55;
+  white-space: nowrap;
 }
 .outline-list {
   flex: 1;
@@ -433,9 +538,9 @@ body {
 .outline-item {
   display: block;
   width: 100%;
-  padding: 0.28rem 0.6rem;
+  padding: 0.3rem 0.6rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -451,8 +556,11 @@ body {
   background: var(--hover);
   opacity: 1;
 }
+/* La sección que se está leyendo: píldora con el acento suave. */
 .outline-item.active {
-  background: var(--selection);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
   opacity: 1;
 }
 .outline-empty {
@@ -476,6 +584,9 @@ body {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
 }
 
 .editor .cm-editor {
@@ -483,71 +594,154 @@ body {
 }
 
 .preview {
-  border: 0;
-  border-left: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  min-width: 0;
   width: 100%;
   height: 100%;
   background: var(--preview-bg);
   transition: background-color 150ms ease;
 }
 
-.statusbar {
+/* ====== Dock ==============================================================
+   Píldora flotante abajo al centro con las herramientas del documento y las estadísticas.
+   En modo zen (body.zen, zen.ts) baja y se desvanece. */
+.dock {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 15;
   display: flex;
-  gap: 1.2rem;
-  padding: 0.35rem 0.8rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.8rem;
-  opacity: 0.75;
-  font-variant-numeric: tabular-nums;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100vw - 24px);
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--float-shadow);
+  font-size: 0.78rem;
+  user-select: none;
+  transition:
+    opacity var(--chrome-fade),
+    transform var(--chrome-fade),
+    background-color 150ms ease;
 }
 
+.dock .bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 28px;
+  margin: 0;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+}
+
+.dock-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.dock-stats {
+  padding: 0 0.7rem 0 0.35rem;
+  white-space: nowrap;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  outline: none;
+}
+
+.dock-stats:hover,
+.dock-stats:focus-visible {
+  opacity: 1;
+}
+/* ====================================================================== */
+
 /* ====== Pestañas ==========================================================
-   Banda entre la titlebar y el editor, con las CSS vars del tema (claro/oscuro/sepia).
-   La activa se marca con fondo + subrayado de acento; el ● de cambios sin guardar es el
-   mismo de la titlebar. Si no entran, la lista scrollea en horizontal (la rueda también,
-   ver tab-bar.ts) y el botón + queda siempre visible a la derecha. */
+   Píldoras en la fila de la titlebar, con las CSS vars del tema. La activa es una tarjeta
+   (fondo + borde fino); las demás, texto atenuado. Se encogen hasta su min-width y lo que
+   no entra va al menú +N (tab-bar.ts). El espacio libre que queda a la derecha del + es la
+   zona para arrastrar la ventana. */
 .tab-bar {
   display: flex;
-  align-items: stretch;
-  height: 32px;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  /* Siempre queda algo de barra libre para agarrar la ventana. */
+  padding-right: 48px;
   font-size: 0.8rem;
   user-select: none;
 }
 
 .tab-list {
   display: flex;
+  gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 
 .tab {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex: 0 0 auto;
-  max-width: 220px;
-  height: 100%;
-  padding: 0 0.35rem 0 0.75rem;
-  border: 0;
-  border-right: 1px solid var(--border);
+  /* Ancho explícito (no flex-basis): así la lista mide lo que suman sus pestañas y estas se
+     encogen solo cuando falta espacio. */
+  flex: 0 1 auto;
+  width: 190px;
+  min-width: 96px;
+  height: 28px;
+  padding: 0 0.3rem 0 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: default;
+  transition:
+    background-color 150ms ease,
+    opacity var(--chrome-fade);
+}
+
+.tab[hidden] {
+  display: none;
+}
+
+.tab:hover {
+  background: var(--hover);
 }
 
 .tab.is-active {
-  background: var(--hover);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--bg);
+  border-color: var(--border);
 }
 
-.tab-name,
-.tab-dirty {
-  opacity: 0.75;
+.tab:focus-visible,
+.tab-new:focus-visible,
+.tab-overflow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* El nombre se corta con un desvanecido, no con "…": se lee más del nombre. */
+.tab-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+  opacity: 0.7;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent);
 }
 
 .tab.is-active .tab-name,
@@ -555,25 +749,25 @@ body {
   opacity: 1;
 }
 
-.tab:focus-visible,
-.tab-new:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* Cambios sin guardar: un punto de acento en el lugar de la ×. Al pasar el mouse vuelve la
+   × para poder cerrar. */
 .tab-dirty {
   display: none;
-  font-size: 0.7rem;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  font-size: 0;
 }
 
-.tab.is-dirty .tab-dirty {
-  display: inline;
+.tab.is-dirty:not(:hover) .tab-dirty {
+  display: block;
+}
+
+.tab.is-dirty:not(:hover) .tab-close {
+  display: none;
 }
 
 /* La × se ve en la activa y al pasar el mouse: con muchas pestañas, una × en cada una
@@ -584,7 +778,7 @@ body {
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: 50%;
   opacity: 0;
 }
 
@@ -598,21 +792,66 @@ body {
   background: var(--hover);
 }
 
-.tab-new {
+.tab-new,
+.tab-overflow {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 32px;
+  height: 28px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
-  opacity: 0.7;
   cursor: default;
+}
+
+.tab-new {
+  width: 28px;
+  opacity: 0.7;
 }
 
 .tab-new:hover {
   opacity: 1;
   background: var(--hover);
+}
+
+.tab-overflow-select {
+  position: relative;
+  flex: none;
+}
+
+.tab-overflow {
+  padding: 0 10px;
+  background: var(--hover);
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-overflow[hidden] {
+  display: none;
+}
+
+.tab-overflow-menu {
+  left: 0;
+  right: auto;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.tab-overflow-item {
+  gap: 0.5rem;
+}
+
+.tab-overflow-dirty {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
 }
 /* ====================================================================== */
 
@@ -623,9 +862,11 @@ body {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.3rem 0.8rem;
+  margin: 0 var(--gap) var(--gap);
+  padding: 0.4rem 0.6rem 0.4rem 0.9rem;
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   font-size: 0.82rem;
 }
 
@@ -787,7 +1028,7 @@ body {
 }
 
 /* Distraction-free: oculta el preview y centra el editor en un ancho de lectura cómodo;
-   atenúa el chrome (titlebar/statusbar), recuperable al pasar el mouse. La clase la pone
+   atenúa el chrome (titlebar/dock), recuperable al pasar el mouse. La clase la pone
    y la saca el JS (toggleFocusMode); todo es reversible al salir. */
 /* El enfoque esconde el esquema: es parte del "sin distracciones". */
 body.focus-mode .outline {
@@ -803,20 +1044,16 @@ body.focus-mode .cm-content {
   max-width: 70ch; /* ancho de lectura cómodo */
   margin: 0 auto; /* centrado */
 }
-/* Atenuamos el chrome, PERO no #status: ahí se pinta el flash de confirmación de los modos
-   (toggleFocusMode escribe en #status). La opacidad en el padre afecta a todo su subárbol y
-   un hijo no puede "des-atenuarse"; por eso atenuamos los hijos de la titlebar uno a uno,
-   excluyendo #status, en vez de la titlebar entera. */
-body.focus-mode .titlebar > *:not(#status),
-body.focus-mode .tab-bar,
-body.focus-mode .statusbar {
+/* Atenuamos el chrome (titlebar y dock). El aviso de estado (#status) queda fuera: ahí se
+   pinta el flash de confirmación de los modos. */
+body.focus-mode .titlebar > *,
+body.focus-mode .dock {
   opacity: 0.25;
-  transition: opacity 150ms ease;
 }
-body.focus-mode .titlebar:hover > *:not(#status),
-body.focus-mode .tab-bar:hover,
-body.focus-mode .tab-bar:focus-within,
-body.focus-mode .statusbar:hover {
+body.focus-mode .titlebar:hover > *,
+body.focus-mode .titlebar:focus-within > *,
+body.focus-mode .dock:hover,
+body.focus-mode .dock:focus-within {
   opacity: 1; /* escape: mover/cerrar la ventana, cambiar de pestaña, ver las stats */
 }
 /* La línea activa no debe competir con el atenuado del párrafo. */
@@ -829,10 +1066,13 @@ body.focus-mode .cm-activeLine {
    bottombar; aquí también la barra de pestañas). El editor crece solo (body es
    flex-column y .split es flex:1). El
    external-change-bar NUNCA se oculta: es un aviso de posible pérdida de datos. */
-body.is-fullscreen .titlebar,
-body.is-fullscreen .tab-bar,
-body.is-fullscreen .statusbar {
+body.is-fullscreen .titlebar {
   display: none; /* las pestañas siguen accesibles con Ctrl+Tab / Ctrl+W / Ctrl+T */
+}
+/* Sin titlebar, las tarjetas necesitan su margen de arriba. El dock se queda: es flotante y
+   el modo zen lo retira mientras escribes. */
+body.is-fullscreen .workspace {
+  padding-top: var(--gap);
 }
 /* Reveal-on-hover del borde superior: la titlebar reaparece como overlay (sin reflujo del
    editor) mientras el mouse esté arriba, para mover/cerrar la ventana (paridad con el
@@ -856,8 +1096,7 @@ body.is-fullscreen.reveal-chrome .titlebar {
   left: 0;
   right: 0;
   z-index: 11;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
 }
 
 /* ====== M10: resaltado de Markdown ======================================
@@ -926,8 +1165,6 @@ body.view-editor .split { grid-template-columns: 1fr; }
    DOM (display:none), no se destruye; al volver a editor/split, setViewMode lo re-enfoca. */
 body.view-preview #editor { display: none; }
 body.view-preview .split { grid-template-columns: 1fr; }
-/* Sin editor a la izquierda, el border-left del preview no tiene sentido: lo anulamos. */
-body.view-preview #preview { border-left: 0; }
 
 /* Dividido (view-split): el comportamiento por defecto de .split (1fr 1fr) — no hace falta
    override, lo dejamos explicito como intencion para que quede claro que es un estado mas. */
@@ -936,8 +1173,8 @@ body.view-preview #preview { border-left: 0; }
    margin-right de .bar-btn dentro del grupo y separamos con gap para el aspecto segmentado. */
 .view-control {
   display: inline-flex;
+  align-items: center;
   gap: 2px;
-  margin-right: 0.4rem;
 }
 .view-control .bar-btn {
   margin-right: 0;
@@ -953,8 +1190,8 @@ body.view-preview #preview { border-left: 0; }
 /* Vista activa resaltada (la marca el JS via aria-pressed). Sumamos un borde de acento
    ademas del fondo para que el estado activo no se confunda con el hover (mismo --hover). */
 .view-btn[aria-pressed="true"] {
-  background: var(--hover);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* El modo enfoque MANDA sobre la vista (fuerza solo-editor): atenuamos y bloqueamos el
@@ -1188,3 +1425,39 @@ kbd {
   object-fit: contain;
   border-radius: 4px;
 }
+
+/* ====== Modo zen (zen.ts) =================================================
+   Mientras escribes: el dock baja y se desvanece, el esquema se pliega y de la titlebar
+   solo queda, tenue, la pestaña activa. Mover el mouse lo trae todo de vuelta. */
+body.zen .dock {
+  opacity: 0;
+  transform: translate(-50%, 14px);
+  pointer-events: none;
+}
+body.zen .workspace {
+  padding-bottom: var(--gap);
+}
+body.zen .dock-status {
+  bottom: 14px;
+}
+/* El esquema se desvanece pero conserva su lugar: si se plegara, el editor cambiaría de
+   ancho y el texto se reacomodaría justo mientras escribes. */
+body.zen .outline {
+  opacity: 0;
+  pointer-events: none;
+}
+body.zen .titlebar > :not(.tab-bar),
+body.zen .tab-bar > :not(.tab-list),
+body.zen .tab:not(.is-active) {
+  opacity: 0;
+  pointer-events: none;
+}
+body.zen .tab.is-active {
+  opacity: 0.45;
+  background: transparent;
+  border-color: transparent;
+}
+body.zen .tab.is-active .tab-close {
+  opacity: 0;
+}
+/* ====================================================================== */

@@ -17,6 +17,7 @@ import {
 } from "./document-session";
 import { activeDocId } from "./tabs";
 import { initTabBar } from "./tab-bar";
+import { initZen } from "./zen";
 import {
   initPreviewFrame,
   postSync,
@@ -149,6 +150,7 @@ initSpellDictListener();
 
 initViewMode(isFocusMode); // M13: el modo enfoque es dueño de la vista mientras esta activo
 initFullscreen(); // M9.3
+initZen(); // el chrome se retira mientras escribes
 initModeShortcuts(); // M9/M11/M13 + pestañas: atajos en fase captura
 
 // Capa B + M8.4a: pestañas iniciales (archivos de la asociacion .md o snapshots de crash).

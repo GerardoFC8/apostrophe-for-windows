@@ -108,7 +108,7 @@ export function toggleHemingway(): void {
 }
 
 // M9.3: pantalla completa (F11). Tauri controla el fullscreen REAL del SO; nosotros
-// ocultamos el chrome custom (titlebar + statusbar) con la clase body.is-fullscreen. UNA
+// ocultamos el chrome custom (la titlebar) con la clase body.is-fullscreen. UNA
 // fuente de verdad: syncFullscreenChrome() lee el estado real y pinta el body, asi un toggle
 // por F11 y una salida por otra via quedan coherentes (Tauri NO expone evento de fullscreen).
 // Requiere core:window:allow-set-fullscreen + allow-is-fullscreen en capabilities/default.json;

@@ -77,6 +77,10 @@ export interface Messages {
   "tabs.unsavedLabel": string;
   /// Tooltip de una pestaña recuperada de un snapshot ({path} = archivo original).
   "tabs.restoredFrom": string;
+  /// Botón +N de la barra de pestañas: cuántas no entran y quedan en su menú.
+  "tabs.more": Plural;
+  /// Nombre accesible del dock inferior (barra de herramientas del documento).
+  "dock.label": string;
 
   // Barra de cambio externo
   "external.message": string;
@@ -245,6 +249,8 @@ const ES: Messages = {
   "tabs.closeHint": "Cerrar pestaña (Ctrl+W)",
   "tabs.unsavedLabel": "{name}, con cambios sin guardar",
   "tabs.restoredFrom": "Recuperado de {path}",
+  "tabs.more": { one: "{n} pestaña más", other: "{n} pestañas más" },
+  "dock.label": "Herramientas del documento",
 
   "external.message": "El archivo cambió en disco.",
   "external.reload": "Recargar y perder mis cambios",
@@ -416,6 +422,8 @@ const EN: Messages = {
   "tabs.closeHint": "Close tab (Ctrl+W)",
   "tabs.unsavedLabel": "{name}, unsaved changes",
   "tabs.restoredFrom": "Recovered from {path}",
+  "tabs.more": { one: "{n} more tab", other: "{n} more tabs" },
+  "dock.label": "Document tools",
 
   "external.message": "The file changed on disk.",
   "external.reload": "Reload and discard my changes",

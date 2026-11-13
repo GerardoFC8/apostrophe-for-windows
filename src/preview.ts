@@ -30,7 +30,9 @@ function markdownStylesheet(v: (name: string) => string): string {
     a{color:${v("--accent")};}
     code,pre{background:${v("--preview-code-bg")};border-radius:6px;font-family:"JetBrains Mono Variable",ui-monospace,monospace;}
     code{padding:.1em .35em;}
-    pre{padding:.7em .9em;overflow:auto;}
+    pre{padding:.8em 1em;overflow:auto;border:1px solid ${v("--border")};border-radius:10px;}
+    div.sourceCode{margin:1em 0;overflow:auto;background:${v("--preview-code-bg")};border:1px solid ${v("--border")};border-radius:10px;}
+    div.sourceCode pre{margin:0;border:0;border-radius:0;background:none;overflow:visible;}
     pre code{background:none;padding:0;}
     blockquote{border-left:3px solid ${v("--border")};margin-left:0;padding-left:1em;opacity:.85;}
     h1,h2,h3{line-height:1.25;}
@@ -66,15 +68,29 @@ function syntaxStylesheet(v: (name: string) => string): string {
   return `<style>${rules.join("")}code span.co,code span.do{font-style:italic;}</style>`;
 }
 
+// Barras de desplazamiento de la vista previa, iguales a las de la app (styles.css): el
+// iframe es otro documento y no hereda esas reglas. `color-scheme` hace que lo que siga
+// siendo nativo (controles, esquinas) use la variante clara u oscura del tema. Solo van en la
+// vista previa: el HTML exportado no las lleva.
+function scrollbarStyle(v: (name: string) => string): string {
+  const dark = document.documentElement.dataset.theme === "dark";
+  return `<style>
+    :root{color-scheme:${dark ? "dark" : "light"};}
+    ::-webkit-scrollbar{width:12px;height:12px;}
+    ::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent;}
+    ::-webkit-scrollbar-thumb{background-color:${v("--scrollbar-thumb")};background-clip:content-box;border:3px solid transparent;border-radius:999px;min-height:40px;}
+    ::-webkit-scrollbar-thumb:hover{background-color:${v("--scrollbar-thumb-hover")};}
+    pre::-webkit-scrollbar{height:10px;}
+  </style>`;
+}
+
 // El zoom del texto (zoom.ts) solo va en la vista previa: lo que se exporta sale siempre a
 // tamaño normal.
 function previewStyle(): string {
   const cs = getComputedStyle(document.documentElement);
   const zoom = cs.getPropertyValue("--text-zoom").trim() || "1";
-  return (
-    markdownStylesheet((name) => cs.getPropertyValue(name).trim()) +
-    `<style>body{font-size:calc(100% * ${zoom});}</style>`
-  );
+  const v = (name: string) => cs.getPropertyValue(name).trim();
+  return markdownStylesheet(v) + `<style>body{font-size:calc(100% * ${zoom});}</style>` + scrollbarStyle(v);
 }
 
 // Tema para EXPORTAR: siempre la paleta CLARA, sin importar el tema activo. Un HTML o un
@@ -206,7 +222,10 @@ export async function render(): Promise<void> {
   } catch (err) {
     if (seq !== renderSeq) return;
     flashStatus(t("status.previewFailed"), 4000);
-    preview.srcdoc = `<pre style="color:#c00;font-family:monospace;padding:1rem">${escapeHtml(String(err))}</pre>`;
+    // Con la hoja del tema: en el oscuro, el error no debe aparecer en un recuadro blanco.
+    preview.srcdoc = withTheme(
+      `<pre style="color:#e01b24;background:none;border:0;white-space:pre-wrap">${escapeHtml(String(err))}</pre>`,
+    );
   }
 }
 
@@ -254,6 +273,11 @@ export function initPreviewWindow(): void {
   void listen("preview-window-ready", () => {
     previewWindowOpen = true;
     pushToPreviewWindow();
+  });
+  // Cerrada con su propia X: el botón deja de verse activo (lo avisa el backend).
+  void listen("preview-window-closed", () => {
+    previewWindowOpen = false;
+    previewWindowBtn.setAttribute("aria-pressed", "false");
   });
 
   previewWindowBtn.addEventListener("click", () => void togglePreviewWindow());
