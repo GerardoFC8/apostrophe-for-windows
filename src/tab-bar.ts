@@ -127,6 +127,8 @@ function render(): void {
 let overflowIds: DocId[] = [];
 
 function layoutOverflow(): void {
+  // Lo que lista el menú puede dejar de valer (cambió cuántas entran o ya entran todas).
+  closeOverflowMenu();
   const buttons = Array.from(tabList.children) as HTMLElement[];
   for (const el of buttons) el.hidden = false;
   overflowBtn.hidden = true;
@@ -189,6 +191,26 @@ function openOverflowMenu(): void {
   overflowMenu.querySelector<HTMLElement>(".menu-item")?.focus();
 }
 
+// Teclado dentro del menú (patrón ARIA "menu"): flechas, Inicio y Fin recorren las entradas;
+// Esc cierra y devuelve el foco al botón.
+function onOverflowMenuKey(e: KeyboardEvent): void {
+  const items = Array.from(overflowMenu.querySelectorAll<HTMLElement>(".menu-item"));
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  let target: HTMLElement | undefined;
+  if (e.key === "ArrowDown") target = items[(index + 1) % items.length];
+  else if (e.key === "ArrowUp") target = items[(index - 1 + items.length) % items.length];
+  else if (e.key === "Home") target = items[0];
+  else if (e.key === "End") target = items[items.length - 1];
+  else if (e.key === "Escape") {
+    e.preventDefault();
+    closeOverflowMenu();
+    overflowBtn.focus();
+    return;
+  } else return;
+  e.preventDefault();
+  target?.focus();
+}
+
 function closeOverflowMenu(): void {
   if (overflowMenu.hidden) return;
   overflowMenu.hidden = true;
@@ -205,11 +227,12 @@ export function initTabBar(): void {
   document.addEventListener("pointerdown", (e) => {
     if (!(e.target as Element).closest(".tab-overflow-select")) closeOverflowMenu();
   });
-  overflowMenu.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeOverflowMenu();
-      overflowBtn.focus();
-    }
+  overflowMenu.addEventListener("keydown", onOverflowMenuKey);
+  // Tab saca el foco del menú: se cierra, como los demás menús. El foco que vuelve al botón
+  // +N no cuenta: ese clic ya cierra el menú, y cerrarlo aquí haría que lo reabriera.
+  overflowMenu.addEventListener("focusout", (e) => {
+    const next = e.relatedTarget as Node | null;
+    if (next !== overflowBtn && !overflowMenu.contains(next)) closeOverflowMenu();
   });
   // Al cambiar el ancho de la ventana cambia cuántas entran. Ocultar pestañas no cambia el
   // tamaño de la barra (ocupa el espacio libre), así que no hay bucle.

@@ -41,14 +41,21 @@ export async function updateStats(): Promise<void> {
     const s = await invoke<Stats>("count_stats", { text: getText() });
     if (seq !== statsSeq) return;
     // En el dock solo van las palabras; el resto queda en el tooltip.
-    statWords.textContent = tp("stats.words", s.words);
-    statWords.title = [
+    const words = tp("stats.words", s.words);
+    const details = [
       tp("stats.chars", s.characters),
       tp("stats.sentences", s.sentences),
       tp("stats.paragraphs", s.paragraphs),
       formatReadTime(s.read_time),
     ].join(" · ");
+    statWords.textContent = words;
+    statWords.title = details;
+    // El tooltip no se anuncia con el teclado: el nombre accesible lleva todo.
+    statWords.setAttribute("aria-label", `${words} · ${details}`);
   } catch (err) {
-    statWords.textContent = `${t("error.generic")}: ${String(err)}`;
+    // En la píldora del dock cabe poco: el detalle del error va en el tooltip.
+    statWords.textContent = t("error.generic");
+    statWords.title = String(err);
+    statWords.setAttribute("aria-label", `${t("error.generic")}: ${String(err)}`);
   }
 }

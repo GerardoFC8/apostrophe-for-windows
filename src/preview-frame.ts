@@ -135,8 +135,10 @@ export const FRAME_SCRIPT = `<script>
     requestAnimationFrame(function () {
       reporting = false;
       var y = window.scrollY;
-      if (applied >= 0 && Math.abs(y - applied) < 2) return;
+      // El eco se descarta una sola vez: el siguiente desplazamiento ya es del usuario.
+      var echo = applied >= 0 && Math.abs(y - applied) < 2;
       applied = -1;
+      if (echo) return;
       var ts = headingTops();
       // Lo informado pasa a ser lo que se conserva si cambia la altura (una imagen que
       // termina de cargar no debe devolver la vista a donde la dejó el editor).

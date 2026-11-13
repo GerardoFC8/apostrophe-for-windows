@@ -112,9 +112,21 @@ export function onSelectionChanged(): void {
   markActive();
 }
 
+// Último título elegido en el panel, y cuándo. Un título de las últimas secciones no puede
+// quedar arriba (el documento se acaba antes): el desplazamiento termina al final, y sin esto
+// el resaltado saltaría al último título en vez de quedarse en el elegido.
+let lastJump = { index: -1, at: 0 };
+const JUMP_WINDOW_MS = 800;
+
+/// El título elegido en el panel si fue hace un instante, o -1.
+export function recentJump(): number {
+  return performance.now() - lastJump.at < JUMP_WINDOW_MS ? lastJump.index : -1;
+}
+
 function jumpTo(index: number): void {
   const heading = headings[index];
   if (!heading) return;
+  lastJump = { index, at: performance.now() };
   const line = Math.min(heading.line + 1, view.state.doc.lines);
   const pos = view.state.doc.line(line).from;
   view.dispatch({

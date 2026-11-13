@@ -80,7 +80,7 @@ function scrollbarStyle(v: (name: string) => string): string {
     ::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent;}
     ::-webkit-scrollbar-thumb{background-color:${v("--scrollbar-thumb")};background-clip:content-box;border:3px solid transparent;border-radius:999px;min-height:40px;}
     ::-webkit-scrollbar-thumb:hover{background-color:${v("--scrollbar-thumb-hover")};}
-    pre::-webkit-scrollbar{height:10px;}
+    pre::-webkit-scrollbar,div.sourceCode::-webkit-scrollbar{height:10px;}
   </style>`;
 }
 

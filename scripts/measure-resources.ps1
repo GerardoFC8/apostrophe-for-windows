@@ -73,10 +73,13 @@ function Get-Tree {
     $result = @($all | Where-Object ProcessId -eq $root.Id)
     $queue = [Collections.Generic.Queue[int]]::new()
     $queue.Enqueue($root.Id)
+    # Un PID reutilizado podría apuntar a un ancestro: sin esto el recorrido no terminaría.
+    $seen = [Collections.Generic.HashSet[int]]::new()
+    [void]$seen.Add($root.Id)
     while ($queue.Count -gt 0) {
         $children = $byParent["$($queue.Dequeue())"]
         foreach ($child in @($children)) {
-            if (-not $child) { continue }
+            if (-not $child -or -not $seen.Add([int]$child.ProcessId)) { continue }
             $result += $child
             $queue.Enqueue([int]$child.ProcessId)
         }
@@ -87,7 +90,6 @@ function Get-Tree {
 $prevCpu = @{}
 $prevTime = [Diagnostics.Stopwatch]::StartNew()
 $samples = [Collections.Generic.List[object]]::new()
-$kinds = @{}
 
 Write-Host ("Midiendo {0} (PID {1}) durante {2} s, una muestra cada {3} s…" -f $root.ProcessName, $root.Id, $Duration, $Interval)
 $deadline = (Get-Date).AddSeconds($Duration)
@@ -101,7 +103,6 @@ while ((Get-Date) -lt $deadline -and -not $root.HasExited) {
         $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
         if (-not $proc) { continue }
         $kind = Get-Kind $p
-        if (-not $kinds.ContainsKey([int]$p.ProcessId)) { $kinds[[int]$p.ProcessId] = $kind }
         $cpu = $proc.TotalProcessorTime.TotalSeconds
         $delta = if ($prevCpu.ContainsKey($proc.Id)) { $cpu - $prevCpu[$proc.Id] } else { 0 }
         $prevCpu[$proc.Id] = $cpu

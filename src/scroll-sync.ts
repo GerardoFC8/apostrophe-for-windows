@@ -6,7 +6,7 @@
 // existe igual en los dos lados (pandoc no informa de qué renglón sale cada párrafo), y entre
 // uno y otro la interpolación es suficiente para leer a la par.
 import { view } from "./editor";
-import { getHeadings, markSection, sectionAt } from "./outline";
+import { getHeadings, markSection, recentJump, sectionAt } from "./outline";
 
 /// Posición a sincronizar. `index` es el título (-1 = antes del primero) y `fraction` cuánto
 /// se avanzó hacia el siguiente; `end` pide ir al final.
@@ -48,7 +48,7 @@ function onScroll(): void {
     pending = false;
     last = compute();
     send(last);
-    markSection(last.end ? getHeadings().length - 1 : sectionInView());
+    markSection(last.end ? endSection() : sectionInView());
   });
 }
 
@@ -67,10 +67,17 @@ function sectionInView(): number {
   return sectionAt(view.state.doc.lineAt(block.from).number - 1);
 }
 
+// Al final del documento las últimas secciones no llegan arriba: se marca la última, salvo
+// que se haya llegado ahí con un clic en el esquema, que manda.
+function endSection(): number {
+  const jumped = recentJump();
+  return jumped >= 0 ? jumped : getHeadings().length - 1;
+}
+
 // El esquema resalta la sección que se lee en la vista previa (`section`, con la misma regla
-// que el editor). Al final del documento es la última.
+// que el editor).
 function showSection(pos: SyncPosition): void {
-  markSection(pos.end ? getHeadings().length - 1 : (pos.section ?? pos.index));
+  markSection(pos.end ? endSection() : (pos.section ?? pos.index));
 }
 
 // El editor se ve (vista dividida o solo editor). Con la vista previa sola está oculto y su
