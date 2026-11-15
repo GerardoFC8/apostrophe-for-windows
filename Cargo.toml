@@ -17,3 +17,12 @@ members = [
     "crates/apostrophe-sidecars",
     "crates/apostrophe-cli",
 ]
+
+# Binarios de release más chicos y algo más rápidos, a cambio de un build más lento.
+# No se usa `panic = "abort"`: con él, un pánico en un comando de Tauri cerraría la app
+# entera (y con ella el texto sin guardar) en vez de fallar solo ese comando, y el export
+# dejaría de limpiar sus temporales al propagarse un pánico.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
