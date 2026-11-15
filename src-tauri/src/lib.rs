@@ -173,6 +173,9 @@ fn align_table(text: String) -> Option<String> {
 /// Etiqueta de la ventana; tiene que coincidir con la lista `windows` de la capability.
 const PREVIEW_WINDOW: &str = "preview";
 
+/// Evento que avisa a la ventana principal que la de vista previa se cerro.
+const PREVIEW_CLOSED_EVENT: &str = "preview-window-closed";
+
 /// Abre la ventana de vista previa, o la cierra si ya estaba abierta. Devuelve `true` si
 /// quedo ABIERTA, para que el frontend refleje el estado en el boton.
 #[tauri::command]
@@ -194,7 +197,17 @@ async fn toggle_preview_window(app: tauri::AppHandle) -> Result<bool, String> {
     // ventana). Con el control al maximo se ve igual que una ventana normal.
     .transparent(true)
     .build()
-    .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?;
+    .map_err(|e| format!("no se pudo abrir la ventana de vista previa: {e}"))?
+    // Cerrada con su propia X (no con el boton de la principal): se avisa para que el boton
+    // deje de verse activo. Sin esto la principal solo se entera al volver a pulsarlo.
+    .on_window_event({
+        let app = app.clone();
+        move |event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                let _ = app.emit(PREVIEW_CLOSED_EVENT, ());
+            }
+        }
+    });
     Ok(true)
 }
 

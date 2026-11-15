@@ -45,6 +45,7 @@ function escHasPriorityTarget(): boolean {
   if (isMenuChromeOpen()) return true; // M11: menu hamburguesa u overlay modal abierto
   if (view.dom.querySelector(".cm-search")) return true; // panel de busqueda CM6 abierto
   if (document.querySelector(".spell-menu")) return true; // menu de sugerencias del corrector
+  if (document.querySelector("#tab-overflow-menu:not([hidden])")) return true; // menu +N de pestañas
   return false;
 }
 

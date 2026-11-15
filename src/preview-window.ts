@@ -23,7 +23,12 @@ const opacity = document.querySelector<HTMLInputElement>("#opacity")!;
 
 // El fondo lo pinta el body de esta página, con opacidad; el documento del iframe tiene que
 // ir sin fondo para que se vea. Va al final del <head>, después de la hoja del tema.
-const TRANSPARENT_DOCUMENT = "<style>html,body{background:transparent !important;}</style>";
+//
+// `color-scheme` tiene que coincidir con el de esta página (que no declara ninguno): si el
+// iframe dice "dark" y la página no, Chromium pinta un fondo opaco detrás del iframe y la
+// opacidad deja de verse. La hoja del tema lo fija para el panel de la ventana principal.
+const TRANSPARENT_DOCUMENT =
+  "<style>:root{color-scheme:normal !important;}html,body{background:transparent !important;}</style>";
 
 let background = "#ffffff";
 let alpha = 1;

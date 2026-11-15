@@ -17,9 +17,6 @@
          mouse aquí reaparece la titlebar (paridad con el GtkRevealer del upstream). -->
     <div id="fs-hover-zone" aria-hidden="true"></div>
     <header class="titlebar" data-tauri-drag-region>
-      <span class="brand" data-tauri-drag-region>Elision</span>
-      <span id="doc-name" class="doc-name" data-tauri-drag-region data-i18n="doc.untitled"></span>
-      <span id="status" class="status" data-tauri-drag-region></span>
       <!-- M11: menú hamburguesa. Mismo patrón de popover que .theme-select: un trigger
            (.bar-btn) que togglea un popover role=menu oculto. Abre la ventana de atajos
            y el diálogo Acerca de (ambos overlays modales más abajo). -->
@@ -70,16 +67,73 @@
           <div id="lang-items" role="group"></div>
         </div>
       </div>
-      <div class="theme-select">
-        <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="theme.open">
-          <span class="theme-trigger-icon" id="theme-trigger-icon"></span>
-          <span id="theme-trigger-label"></span>
-          <svg class="chevron" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
-            <path d="M2.2 3.6 L5 6.4 L7.8 3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+      <!-- Pestañas: una por documento abierto, en la fila de arriba. Las construye
+           tab-bar.ts a partir de la colección de tabs.ts (role=tablist/tab, aria-selected,
+           flechas para moverse, Supr y clic central para cerrar). Se encogen hasta un mínimo;
+           si aun así no entran, las que sobran van al menú +N. El espacio libre de la barra
+           es la zona para arrastrar la ventana. -->
+      <div class="tab-bar" id="tab-bar" data-tauri-drag-region>
+        <div id="tab-list" class="tab-list" role="tablist" data-i18n-aria-label="tabs.listLabel"></div>
+        <div class="tab-overflow-select">
+          <button class="tab-overflow" id="tab-overflow" type="button" aria-haspopup="menu" aria-expanded="false" hidden></button>
+          <div class="theme-menu tab-overflow-menu" id="tab-overflow-menu" role="menu" data-i18n-aria-label="tabs.listLabel" hidden></div>
+        </div>
+        <button class="tab-new" id="new-tab-btn" type="button" data-i18n-aria-label="tabs.new" data-i18n-title="tabs.newHint">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
           </svg>
         </button>
-        <div class="theme-menu" id="theme-menu" role="menu" hidden></div>
       </div>
+      <!-- Lo que la app anuncia del documento activo: el nombre (con ● si hay cambios) ya se
+           ve en la pestaña; este nodo queda para lectores de pantalla. -->
+      <span id="doc-name" class="visually-hidden" data-i18n="doc.untitled"></span>
+      <div class="window-controls">
+        <button class="win-btn" id="win-min" type="button" data-i18n-aria-label="window.minimize" data-i18n-title="window.minimize">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0 5 H10" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn" id="win-max" type="button" data-i18n-aria-label="window.maximize" data-i18n-title="window.maximize">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn win-close" id="win-close" type="button" data-i18n-aria-label="window.close" data-i18n-title="window.close">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+      </div>
+    </header>
+    <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo de la pestaña
+         ACTIVA cambia en disco mientras tiene cambios locales sin guardar (una pestaña en
+         segundo plano lo muestra al activarse). NO modal: el editor sigue activo. -->
+    <div id="external-change-bar" class="external-change-bar" hidden>
+      <span class="external-change-msg" data-i18n="external.message"></span>
+      <div class="external-change-actions">
+        <button id="reload-btn" class="bar-btn" type="button" data-i18n="external.reload"></button>
+        <button id="keep-btn" class="bar-btn" type="button" data-i18n="external.keep"></button>
+      </div>
+    </div>
+    <div class="workspace">
+    <!-- Esquema del documento: lo llena outline.ts. -->
+    <aside id="outline" class="outline" hidden>
+      <h2 class="outline-title" data-i18n="outline.title"></h2>
+      <nav id="outline-list" class="outline-list" data-i18n-aria-label="outline.title"></nav>
+    </aside>
+    <main class="split">
+      <div id="editor" class="editor" role="tabpanel"></div>
+      <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
+           acceder a window.parent.__TAURI__ (cierra XSS via .md malicioso). allow-scripts
+           deja correr MathJax. -->
+      <iframe id="preview" class="preview" data-i18n-title="view.previewFrame" sandbox="allow-scripts"></iframe>
+    </main>
+    </div>
+    <!-- Dock: las herramientas del documento en una píldora flotante abajo (esquema, vista,
+         ventana aparte, tema, exportar) y las estadísticas. Mientras escribes se oculta
+         (zen.ts) y vuelve al mover el mouse. El aviso de estado (#status, status.ts) flota
+         encima: guardado, exportado, errores. -->
+    <div class="dock" id="dock" role="toolbar" data-i18n-aria-label="dock.label">
       <!-- M13: control de vista de 3 estados (solo editor / dividido / solo vista). Ctrl+P cicla
            entre ellos; estos botones permiten el clic directo. SVG inline (sin fuente de iconos)
            coherente con el resto del chrome. El boton activo se resalta via aria-pressed (CSS). -->
@@ -120,70 +174,27 @@
           </svg>
         </button>
       </div>
-      <button class="bar-btn" id="export-btn" type="button" data-i18n-title="export.hint" data-i18n="export.action"></button>
-      <div class="window-controls">
-        <button class="win-btn" id="win-min" type="button" data-i18n-aria-label="window.minimize" data-i18n-title="window.minimize">
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-            <path d="M0 5 H10" stroke="currentColor" stroke-width="1" />
-          </svg>
+      <span class="dock-sep" aria-hidden="true"></span>
+      <div class="theme-select">
+        <button class="bar-btn theme-trigger" id="theme-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="theme.open">
+          <span class="theme-trigger-icon" id="theme-trigger-icon"></span>
+          <span id="theme-trigger-label" class="visually-hidden"></span>
         </button>
-        <button class="win-btn" id="win-max" type="button" data-i18n-aria-label="window.maximize" data-i18n-title="window.maximize">
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-            <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
-          </svg>
-        </button>
-        <button class="win-btn win-close" id="win-close" type="button" data-i18n-aria-label="window.close" data-i18n-title="window.close">
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-            <path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1" />
-          </svg>
-        </button>
+        <div class="theme-menu" id="theme-menu" role="menu" hidden></div>
       </div>
-    </header>
-    <!-- Pestañas: una por documento abierto. Las construye tab-bar.ts a partir de la
-         colección de tabs.ts (role=tablist/tab, aria-selected, flechas para moverse, Supr y
-         clic central para cerrar). Scroll horizontal cuando no entran. -->
-    <div class="tab-bar" id="tab-bar">
-      <div id="tab-list" class="tab-list" role="tablist" data-i18n-aria-label="tabs.listLabel"></div>
-      <button class="tab-new" id="new-tab-btn" type="button" data-i18n-aria-label="tabs.new" data-i18n-title="tabs.newHint">
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      <button class="bar-btn dock-btn" id="export-btn" type="button" data-i18n-title="export.hint" data-i18n-aria-label="export.action">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 10 V2 M5 4.8 L8 2 L11 4.8" />
+          <path d="M3.5 8.5 V12.5 A1 1 0 0 0 4.5 13.5 H11.5 A1 1 0 0 0 12.5 12.5 V8.5" />
         </svg>
       </button>
+      <span class="dock-sep" aria-hidden="true"></span>
+      <!-- El contador de palabras lo rellena updateStats (stats.ts) con las formas plurales
+           del catálogo. Caracteres, oraciones, párrafos y tiempo de lectura van en su tooltip:
+           se consultan poco y no merecen espacio en el dock. -->
+      <span id="stat-words" class="dock-stats" tabindex="0"></span>
     </div>
-    <!-- M8.4b: infobar de cambio externo. Solo visible cuando el archivo de la pestaña
-         ACTIVA cambia en disco mientras tiene cambios locales sin guardar (una pestaña en
-         segundo plano lo muestra al activarse). NO modal: el editor sigue activo. -->
-    <div id="external-change-bar" class="external-change-bar" hidden>
-      <span class="external-change-msg" data-i18n="external.message"></span>
-      <div class="external-change-actions">
-        <button id="reload-btn" class="bar-btn" type="button" data-i18n="external.reload"></button>
-        <button id="keep-btn" class="bar-btn" type="button" data-i18n="external.keep"></button>
-      </div>
-    </div>
-    <div class="workspace">
-    <!-- Esquema del documento: lo llena outline.ts. -->
-    <aside id="outline" class="outline" hidden>
-      <h2 class="outline-title" data-i18n="outline.title"></h2>
-      <nav id="outline-list" class="outline-list" data-i18n-aria-label="outline.title"></nav>
-    </aside>
-    <main class="split">
-      <div id="editor" class="editor" role="tabpanel"></div>
-      <!-- sandbox sin allow-same-origin: el JS del HTML generado por pandoc NO puede
-           acceder a window.parent.__TAURI__ (cierra XSS via .md malicioso). allow-scripts
-           deja correr MathJax. -->
-      <iframe id="preview" class="preview" data-i18n-title="view.previewFrame" sandbox="allow-scripts"></iframe>
-    </main>
-    </div>
-    <!-- Los contadores los rellena updateStats (main.ts) con las formas plurales del
-         catálogo; arrancan vacíos para no mostrar un idioma equivocado antes del primer
-         render. -->
-    <footer class="statusbar">
-      <span id="stat-words"></span>
-      <span id="stat-chars"></span>
-      <span id="stat-sentences"></span>
-      <span id="stat-paragraphs"></span>
-      <span id="stat-readtime"></span>
-    </footer>
+    <span id="status" class="dock-status" role="status" aria-live="polite"></span>
 
     <!-- M11: overlay modal de atajos de teclado. Backdrop a pantalla completa + panel
          centrado. Se abre con Ctrl+? o desde el menú; se cierra con Esc, con clic en el

@@ -42,7 +42,9 @@ const editorTheme = EditorView.theme({
     borderLeftColor: "var(--accent)",
     borderLeftWidth: "2px",
   },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+  // Mismo selector que el tema base de CodeMirror (6.43) para la selección con foco: con uno
+  // menos específico gana su lila por defecto, que en el tema oscuro tapa el texto.
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
     backgroundColor: "var(--selection)",
   },
   ".cm-activeLine": { backgroundColor: "var(--active-line)" },
