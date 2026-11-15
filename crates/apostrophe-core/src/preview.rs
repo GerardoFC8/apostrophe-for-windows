@@ -8,22 +8,37 @@
 //! - Imagen sola en un parrafo como `<figure>`, con el texto alternativo como pie.
 //! - Atributos de encabezado `{#id .clase}`: comrak los quita del texto pero no los usa.
 //!   De paso, los encabezados salen sin el enlace ancla vacio que agrega comrak.
+//! - Formulas en MathML (`crate::math`), tambien las de un bloque ```` ```math ````.
+//! - Superindice y subindice con espacios (`x^2 y z^3`) salen literales, como en pandoc.
+//! - Bloque de codigo con el lenguaje como clase (```` ```{.python} ````).
+//!
+//! Antes de parsear, [`prepare`] ajusta dos cosas del texto sin cambiar sus renglones (el
+//! scroll sincronizado y el esquema dependen de ellos): el cierre `...` del YAML y los
+//! bloques `$$` de varios renglones.
 //!
 //! Las construcciones que quedan fuera (tablas de cuadricula, listas con letras, bloques
 //! de versos, spans con clase) estan en la tabla de limitaciones del ADR.
 
-use std::fmt::Write;
+use std::borrow::Cow;
+use std::fmt::{self, Write};
 
-use comrak::html::{format_node_default, render_sourcepos};
+use comrak::html::{format_node_default, render_sourcepos, ChildRendering, Context};
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{create_formatter, parse_document, Arena, Options};
 
 /// Documento HTML completo de la vista previa. El frontend inserta su hoja de estilos y su
 /// script antes de `</head>`, igual que hacia con la salida `--standalone` de pandoc.
+///
+/// Corre en un hilo con pila grande: las formulas se convierten con un parser recursivo
+/// (ver `crate::math`).
 pub fn render(markdown: &str) -> String {
+    crate::math::with_big_stack(|| render_here(markdown))
+}
+
+fn render_here(markdown: &str) -> String {
     let options = options();
     let arena = Arena::new();
-    let root = parse_document(&arena, markdown, &options);
+    let root = parse_document(&arena, &prepare(markdown), &options);
     let mut body = String::new();
     // Escribir en un `String` no falla: `fmt::Error` solo puede venir del destino.
     PreviewFormatter::format_document(root, &options, &mut body)
@@ -33,8 +48,9 @@ pub fn render(markdown: &str) -> String {
     )
 }
 
-/// Extensiones de comrak. Ver la seccion "Configuracion de comrak" de ADR-0003.
-fn options() -> Options<'static> {
+/// Extensiones de comrak. Ver la seccion "Configuracion de comrak" de ADR-0003. Las comparte
+/// `crate::outline`: el esquema tiene que ver los mismos titulos que la vista previa.
+pub(crate) fn options() -> Options<'static> {
     let mut o = Options::default();
     let e = &mut o.extension;
     e.strikethrough = true;
@@ -63,6 +79,8 @@ fn options() -> Options<'static> {
     o.render.r#unsafe = true;
     // `data-sourcepos` en cada bloque: base del scroll sincronizado por linea.
     o.render.sourcepos = true;
+    // Clases en las listas de tareas, para quitarles las viñetas solo a ellas.
+    o.render.tasklist_classes = true;
     o
 }
 
@@ -108,6 +126,56 @@ create_formatter!(PreviewFormatter, {
             context.lf()?;
         }
     },
+    NodeValue::Math(ref math) => |context, node, entering| {
+        if entering {
+            write_math(context, node, &math.literal, math.display_math)?;
+        }
+    },
+    NodeValue::CodeBlock(ref block) => |context, node, entering| {
+        let lang = block.info.split_whitespace().next().unwrap_or("");
+        if lang == "math" {
+            if entering {
+                context.cr()?;
+                write_math(context, node, &block.literal, true)?;
+                context.lf()?;
+            }
+            return Ok(ChildRendering::HTML);
+        }
+        // ```{.python}: comrak deja el lenguaje en los atributos y el bloque sin clase.
+        let class_lang = if lang.is_empty() {
+            node.data().attrs.as_ref().and_then(|a| a.classes.first().cloned())
+        } else {
+            None
+        };
+        let Some(class_lang) = class_lang else {
+            return format_node_default(context, node, entering);
+        };
+        if entering {
+            context.cr()?;
+            context.write_str("<pre")?;
+            render_sourcepos(context, node)?;
+            context.write_str("><code class=\"language-")?;
+            context.escape(&class_lang)?;
+            context.write_str("\">")?;
+            context.escape(&block.literal)?;
+            context.write_str("</code></pre>")?;
+            context.lf()?;
+        }
+    },
+    // Pandoc no acepta espacios dentro de `^…^` ni `~…~`: en prosa como "x^2 + y^2" las
+    // marcas quedan como texto. Se respeta para no convertir medio parrafo en superindice.
+    NodeValue::Superscript => |context, node, entering| {
+        if !node.collect_text().contains(char::is_whitespace) {
+            return format_node_default(context, node, entering);
+        }
+        context.write_str("^")?;
+    },
+    NodeValue::Subscript => |context, node, entering| {
+        if !node.collect_text().contains(char::is_whitespace) {
+            return format_node_default(context, node, entering);
+        }
+        context.write_str("~")?;
+    },
     NodeValue::FrontMatter(ref yaml) => |context, entering| {
         if entering {
             let block = TitleBlock::from_yaml(yaml);
@@ -125,6 +193,123 @@ create_formatter!(PreviewFormatter, {
         }
     },
 });
+
+/// Formula como MathML dentro de un `<span class="math …">` con su `data-sourcepos`. Si no
+/// se puede convertir, el LaTeX tal cual, marcado, para que se pueda corregir. El motivo va
+/// como codigo; el texto para la interfaz es cosa del frontend.
+fn write_math<'a>(
+    context: &mut Context,
+    node: &'a AstNode<'a>,
+    latex: &str,
+    display: bool,
+) -> fmt::Result {
+    let class = if display {
+        "math display"
+    } else {
+        "math inline"
+    };
+    write!(context, "<span class=\"{class}\"")?;
+    render_sourcepos(context, node)?;
+    context.write_str(">")?;
+    match crate::math::convert(latex, display) {
+        Ok(mathml) => context.write_str(&mathml)?,
+        Err(error) => {
+            let reason = match error {
+                crate::math::MathError::TooComplex => "too-complex",
+                crate::math::MathError::Invalid(_) => "invalid",
+            };
+            write!(
+                context,
+                "<code class=\"math-error\" data-reason=\"{reason}\">"
+            )?;
+            context.escape(latex)?;
+            context.write_str("</code>")?;
+        }
+    }
+    context.write_str("</span>")
+}
+
+/// Ajustes previos al parseo, sin cambiar la cantidad ni el orden de los renglones. Lo usa
+/// tambien `crate::outline`, para ver el mismo documento que la vista previa.
+///
+/// - Un YAML del principio cerrado con `...` (valido en pandoc) se cierra con `---`, que es
+///   lo unico que comrak reconoce.
+/// - Un bloque `$$` de varios renglones pasa a ```` ```math ````. En CommonMark un renglon
+///   que empieza con `+`, `-` o `>` corta el parrafo, asi que `$$\na\n+ b\n$$` terminaba
+///   partido en una lista. Pandoc no lo corta. Solo se toca un `$$` solo en su renglon, con
+///   su cierre igual y sin renglones en blanco ni cercas de codigo en el medio.
+pub(crate) fn prepare(markdown: &str) -> Cow<'_, str> {
+    let mut lines: Vec<Cow<str>> = markdown.split_inclusive('\n').map(Cow::Borrowed).collect();
+    let mut changed = false;
+
+    let content = |line: &str| line.trim_end_matches(['\n', '\r']).to_string();
+    let ending = |line: &str| line[line.trim_end_matches(['\n', '\r']).len()..].to_string();
+
+    // YAML cerrado con `...`.
+    if lines.first().is_some_and(|l| content(l) == "---") {
+        for line in lines.iter_mut().skip(1) {
+            match content(line).as_str() {
+                "---" => break,
+                "..." => {
+                    let end = ending(line);
+                    *line = Cow::Owned(format!("---{end}"));
+                    changed = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Bloques `$$` de varios renglones.
+    let mut fence: Option<String> = None;
+    let mut i = 0;
+    while i < lines.len() {
+        let text = content(&lines[i]);
+        let trimmed = text.trim_start();
+        let indent = text.len() - trimmed.len();
+        if let Some(open) = &fence {
+            if trimmed.starts_with(open.as_str()) {
+                fence = None;
+            }
+            i += 1;
+            continue;
+        }
+        if indent <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+            fence = Some(trimmed[..3].to_string());
+            i += 1;
+            continue;
+        }
+        if indent <= 3 && trimmed.trim_end() == "$$" {
+            let close = (i + 1..lines.len()).find(|&j| {
+                let inner = content(&lines[j]);
+                inner.trim() == "$$" || inner.trim().is_empty() || is_fence(&inner)
+            });
+            if let Some(j) = close.filter(|&j| j > i + 1 && content(&lines[j]).trim() == "$$") {
+                let (open_end, close_end) = (ending(&lines[i]), ending(&lines[j]));
+                lines[i] = Cow::Owned(format!("{}```math{open_end}", &text[..indent]));
+                let close_text = content(&lines[j]);
+                let close_indent = close_text.len() - close_text.trim_start().len();
+                lines[j] = Cow::Owned(format!("{}```{close_end}", &close_text[..close_indent]));
+                changed = true;
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+
+    if changed {
+        Cow::Owned(lines.concat())
+    } else {
+        Cow::Borrowed(markdown)
+    }
+}
+
+fn is_fence(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    line.len() - trimmed.len() <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+}
 
 /// Pie de figura si `paragraph` es una imagen sola, con texto alternativo, en el nivel
 /// superior del documento. Es la regla `implicit_figures` de pandoc; una imagen sin texto
@@ -174,32 +359,57 @@ struct TitleBlock {
 impl TitleBlock {
     fn from_yaml(front_matter: &str) -> Self {
         let mut block = Self::default();
-        let mut in_authors = false;
-        for line in front_matter.lines() {
+        let lines: Vec<&str> = front_matter.lines().collect();
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i];
+            i += 1;
             let trimmed = line.trim();
-            if trimmed == "---" || trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
+            if line.starts_with(char::is_whitespace) || trimmed.starts_with('#') {
+                continue; // valor anidado de otra clave, o comentario
             }
-            if let Some(item) = trimmed.strip_prefix("- ") {
-                if in_authors {
-                    push_text(&mut block.authors, item);
-                }
-                continue;
-            }
-            in_authors = false;
-            if line.starts_with(char::is_whitespace) {
-                continue; // valor anidado de otra clave
-            }
-            let Some((key, value)) = trimmed.split_once(':') else {
+            let Some((key, raw)) = trimmed.split_once(':') else {
                 continue;
             };
-            let value = unquote(value.trim());
+            // Los renglones con sangria que siguen a la clave: elementos de una lista
+            // (`- Ana`) o el texto de un bloque `|` / `>`.
+            let nested_start = i;
+            while i < lines.len()
+                && (lines[i].trim().is_empty() || lines[i].starts_with(char::is_whitespace))
+            {
+                i += 1;
+            }
+            let nested = &lines[nested_start..i];
+            let value = scalar(raw);
+            let text = if matches!(value, "|" | "|-" | ">" | ">-") {
+                // Bloque literal o plegado: para un titulo, una sola linea.
+                let joined = nested
+                    .iter()
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                non_empty(&joined)
+            } else {
+                non_empty(value)
+            };
             match key.trim() {
-                "title" => block.title = non_empty(value),
-                "subtitle" => block.subtitle = non_empty(value),
-                "date" => block.date = non_empty(value),
-                "author" if value.is_empty() => in_authors = true,
-                "author" => push_text(&mut block.authors, value),
+                "title" => block.title = text,
+                "subtitle" => block.subtitle = text,
+                "date" => block.date = text,
+                "author" => {
+                    if let Some(list) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+                        for item in list.split(',') {
+                            push_text(&mut block.authors, item);
+                        }
+                    } else if value.is_empty() {
+                        for item in nested.iter().filter_map(|l| l.trim().strip_prefix("- ")) {
+                            push_text(&mut block.authors, item);
+                        }
+                    } else if let Some(author) = text {
+                        block.authors.push(author);
+                    }
+                }
                 _ => {}
             }
         }
@@ -231,9 +441,27 @@ impl TitleBlock {
 }
 
 fn push_text(list: &mut Vec<String>, value: &str) {
-    if let Some(text) = non_empty(unquote(value.trim())) {
+    if let Some(text) = non_empty(scalar(value)) {
         list.push(text);
     }
+}
+
+/// Valor escalar de YAML: sin espacios alrededor, sin comillas y sin un comentario final
+/// (` # …`, solo fuera de comillas).
+fn scalar(raw: &str) -> &str {
+    let value = raw.trim();
+    if let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) {
+        // Hasta la comilla de cierre: lo que siga (un comentario) se descarta.
+        return match value[1..].find(quote) {
+            Some(end) => &value[1..1 + end],
+            None => value,
+        };
+    }
+    let value = match value.find(" #") {
+        Some(at) => value[..at].trim_end(),
+        None => value,
+    };
+    unquote(value)
 }
 
 fn non_empty(value: &str) -> Option<String> {
@@ -421,7 +649,7 @@ mod tests {
             "<sup",
             "<mark",
             "href=\"https://example.com\"",
-            "type=\"checkbox\" checked=\"\"",
+            "class=\"task-list-item-checkbox\" checked=\"\"",
             "<dl",
             "<div class=\"aviso\"",
             "markdown-alert-note",
@@ -431,17 +659,49 @@ mod tests {
     }
 
     #[test]
+    fn las_listas_de_tareas_llevan_clases() {
+        let html = body("- [ ] pendiente\n- [x] hecha");
+        assert!(html.contains("<ul class=\"contains-task-list\""), "{html}");
+        assert!(html.contains("<li class=\"task-list-item\""), "{html}");
+    }
+
+    #[test]
     fn tipografia_inteligente() {
         let html = body("\"comillas\" -- y --- y...");
         assert!(html.contains("“comillas” – y — y…"), "{html}");
     }
 
     #[test]
-    fn las_formulas_quedan_marcadas_para_dibujarlas() {
+    fn las_formulas_salen_como_mathml() {
         let html = body("En línea $E = mc^2$.\n\n$$\nx^2\n$$");
-        assert!(html.contains("data-math-style=\"inline\""), "{html}");
-        assert!(html.contains("E = mc^2"), "{html}");
-        assert!(html.contains("data-math-style=\"display\""), "{html}");
+        assert!(
+            html.contains("<span class=\"math inline\" data-sourcepos="),
+            "{html}"
+        );
+        assert!(
+            html.contains("<span class=\"math display\" data-sourcepos="),
+            "{html}"
+        );
+        assert!(html.contains("<math>"), "{html}");
+        assert!(html.contains("<math display=\"block\">"), "{html}");
+        assert!(!html.contains("data-math-style"), "{html}");
+    }
+
+    #[test]
+    fn una_formula_invalida_muestra_su_latex_marcado() {
+        let html = body(r"Mal: $\frac{a}$ y $1 < 2$.");
+        assert!(
+            html.contains(r#"<code class="math-error" data-reason="invalid">\frac{a}</code>"#),
+            "{html}"
+        );
+        // La que esta bien se convierte aunque la otra falle.
+        assert!(html.contains("<math>"), "{html}");
+    }
+
+    #[test]
+    fn una_formula_con_macros_no_se_convierte() {
+        let html = body(r"$\def\a{\a}\a$");
+        assert!(html.contains(r#"data-reason="too-complex""#), "{html}");
     }
 
     #[test]
@@ -449,6 +709,96 @@ mod tests {
         let html = body("```mermaid\ngraph TD\n  A --> B\n```");
         assert!(
             html.contains("<code class=\"language-mermaid\">graph TD\n  A --&gt; B\n</code>"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn un_bloque_de_formula_con_renglones_que_empiezan_con_signo_no_se_parte() {
+        // En CommonMark `+ c` cortaria el parrafo y abriria una lista.
+        let html = body("$$\na + b\n+ c\n- d\n$$\n\nDespués");
+        assert!(!html.contains("<ul"), "{html}");
+        assert!(html.contains("<span class=\"math display\""), "{html}");
+        assert!(html.contains("<math display=\"block\">"), "{html}");
+        assert!(html.contains("Después"), "{html}");
+    }
+
+    #[test]
+    fn un_bloque_math_se_dibuja_como_formula() {
+        let html = body("```math\n\\frac{a}{b}\n```");
+        assert!(html.contains("<mfrac>"), "{html}");
+        assert!(!html.contains("<pre"), "{html}");
+    }
+
+    #[test]
+    fn prepare_no_cambia_los_renglones() {
+        let doc = "---\ntitle: T\n...\n\n$$\na\n+ b\n$$\n\n```\n$$\nno\n$$\n```\n\n$$\n\nx\n$$\n";
+        let prepared = prepare(doc);
+        assert_eq!(prepared.lines().count(), doc.lines().count());
+        let lines: Vec<&str> = prepared.lines().collect();
+        assert_eq!(lines[2], "---", "cierre del YAML");
+        assert_eq!(lines[4], "```math");
+        assert_eq!(lines[7], "```");
+        assert_eq!(lines[10], "$$", "dentro de un bloque de codigo no se toca");
+        assert_eq!(
+            lines[15], "$$",
+            "con un renglon en blanco en el medio no se toca"
+        );
+    }
+
+    #[test]
+    fn prepare_conserva_los_crlf() {
+        let doc = "$$\r\na\r\n$$\r\n";
+        assert_eq!(prepare(doc), "```math\r\na\r\n```\r\n");
+    }
+
+    #[test]
+    fn superindice_y_subindice_con_espacios_quedan_literales() {
+        let html = body("x^2 y z^3 y ~tachado simple~ pero H~2~O y x^2^");
+        assert!(html.contains("x^2 y z^3"), "{html}");
+        assert!(html.contains("~tachado simple~"), "{html}");
+        assert!(
+            html.contains("<sub"),
+            "H~2~O sigue siendo subindice: {html}"
+        );
+        assert!(
+            html.contains("<sup"),
+            "x^2^ sigue siendo superindice: {html}"
+        );
+    }
+
+    #[test]
+    fn el_lenguaje_como_clase_se_resalta() {
+        let html = body("```{.python}\nprint(1 < 2)\n```");
+        assert!(
+            html.contains("<code class=\"language-python\">print(1 &lt; 2)\n</code>"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn yaml_cerrado_con_puntos_suspensivos() {
+        let html = body("---\ntitle: T\n...\n\nTexto");
+        assert!(html.contains("<h1 class=\"title\">T</h1>"), "{html}");
+        assert!(!html.contains("<hr"), "{html}");
+    }
+
+    #[test]
+    fn yaml_con_bloques_listas_y_comentarios() {
+        let html = body(
+            "---\ntitle: |\n  Un título\n  largo\nauthor: [Ana, \"Luis\"]\ndate: 2026-11-15 # comentario\nsubtitle: \"Con # adentro\" # y fuera\n---\n",
+        );
+        assert!(
+            html.contains("<h1 class=\"title\">Un título largo</h1>"),
+            "{html}"
+        );
+        assert!(
+            html.contains("<p class=\"author\">Ana</p>\n<p class=\"author\">Luis</p>"),
+            "{html}"
+        );
+        assert!(html.contains("<p class=\"date\">2026-11-15</p>"), "{html}");
+        assert!(
+            html.contains("<p class=\"subtitle\">Con # adentro</p>"),
             "{html}"
         );
     }

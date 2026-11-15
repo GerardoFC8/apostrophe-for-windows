@@ -1,5 +1,5 @@
-// Panel de vista previa: renderizado via pandoc (backend), hoja de estilos derivada del
-// tema, ventana desacoplada (M18), tema de exportacion y modo de vista (M13).
+// Panel de vista previa: renderizado con comrak (backend, ADR-0003), hoja de estilos derivada
+// del tema, ventana desacoplada (M18), tema de exportacion y modo de vista (M13).
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { view, getText } from "./editor";
@@ -7,16 +7,18 @@ import { activeDocId } from "./tabs";
 import { flashStatus } from "./status";
 import { getLocale, t } from "./i18n";
 import { renderMermaid } from "./mermaid-diagrams";
+import { highlightCode } from "./code-highlight";
 import { FRAME_SCRIPT, frameMessage } from "./preview-frame";
 import type { FrameMessage } from "./preview-frame";
 import type { SyncPosition } from "./scroll-sync";
 
 const preview = document.querySelector<HTMLIFrameElement>("#preview")!;
 
-// Ultimo HTML crudo de pandoc, para re-tematizar el preview al cambiar de tema sin
-// volver a invocar pandoc.
+// Ultimo HTML crudo del backend, para re-tematizar el preview al cambiar de tema sin
+// volver a convertir.
 let lastPreviewHtml = "";
-// Lo que se muestra: el HTML de pandoc con los diagramas Mermaid ya dibujados.
+// Lo que se muestra: el HTML del backend con los diagramas Mermaid dibujados y el código
+// coloreado.
 let lastShownHtml = "";
 
 // CSS del preview derivado de las CSS vars del tema activo (una sola fuente de verdad).
@@ -44,6 +46,7 @@ function markdownStylesheet(v: (name: string) => string): string {
 }
 
 // Clases de token del resaltado de pandoc (skylighting), agrupadas por el color que usan.
+// Desde ADR-0003 solo aparecen en el HTML exportado: la vista previa usa highlight.js.
 const SYNTAX_GROUPS: [string, string[]][] = [
   ["--syntax-keyword", ["kw", "cf", "im"]],
   ["--syntax-type", ["dt", "bu", "wa"]],
@@ -68,6 +71,75 @@ function syntaxStylesheet(v: (name: string) => string): string {
   return `<style>${rules.join("")}code span.co,code span.do{font-style:italic;}</style>`;
 }
 
+// Base de la vista previa: lo que antes ponía la hoja por defecto de pandoc (`--standalone`) y
+// la vista previa daba por hecho, más lo propio de comrak (tareas, notas al pie, alertas,
+// figuras). Va ANTES de markdownStylesheet, que gana donde coinciden. No viaja al HTML
+// exportado: ese lo sigue armando pandoc con su propia hoja.
+function previewBaseStylesheet(v: (name: string) => string): string {
+  const border = v("--border");
+  return `<style>
+    body{hyphens:auto;overflow-wrap:break-word;text-rendering:optimizeLegibility;font-kerning:normal;}
+    p{margin:1em 0;}
+    svg{height:auto;max-width:100%;}
+    h1,h2,h3,h4,h5,h6{margin-top:1.4em;}
+    h5,h6{font-size:1em;font-style:italic;}
+    h6{font-weight:normal;}
+    ol,ul{padding-left:1.7em;margin-top:1em;}
+    li>ol,li>ul{margin-top:0;}
+    code{white-space:pre-wrap;font-size:85%;hyphens:manual;}
+    pre{margin:1em 0;}
+    pre code{white-space:pre;overflow-wrap:normal;}
+    hr{border:none;border-top:1px solid ${border};height:1px;margin:1em 0;}
+    table{margin:1em 0;border-collapse:collapse;width:100%;overflow-x:auto;display:block;font-variant-numeric:lining-nums tabular-nums;}
+    tbody{border-top:1px solid currentColor;border-bottom:1px solid currentColor;}
+    th{border-top:1px solid currentColor;padding:.25em .5em;}
+    td{padding:.125em .5em .25em .5em;}
+    dt{font-weight:600;}
+    dd{margin-left:1.7em;}
+    figure{margin:1em 0;text-align:center;}
+    figcaption{font-size:.9em;opacity:.8;}
+    header#title-block-header{margin-bottom:4em;text-align:center;}
+    span.math.display{display:block;overflow-x:auto;}
+    math{font-size:1.1em;}
+    code.math-error{color:#e01b24;}
+    ul.contains-task-list{list-style:none;}
+    li.task-list-item input[type="checkbox"]{width:.8em;margin:0 .6em .2em -1.4em;vertical-align:middle;}
+    section.footnotes{margin-top:2.5em;padding-top:.5em;border-top:1px solid ${border};font-size:.9em;}
+    .markdown-alert{margin:1em 0;padding:.4em 1em;border-left:4px solid var(--alert);}
+    .markdown-alert>:last-child{margin-bottom:.4em;}
+    .markdown-alert-title{margin:.4em 0;font-weight:600;color:var(--alert);}
+    .markdown-alert-note{--alert:#4493f8;}
+    .markdown-alert-tip{--alert:#3fb950;}
+    .markdown-alert-important{--alert:#ab7df8;}
+    .markdown-alert-warning{--alert:#d29922;}
+    .markdown-alert-caution{--alert:#f85149;}
+  </style>${highlightStylesheet(v)}`;
+}
+
+// Colores de highlight.js, con los mismos grupos que el resaltado de pandoc. Con las
+// variables del tema (solo el oscuro) usa esas; si no, los colores claros de pandoc, que es
+// como se veía la vista previa hasta ahora.
+const HLJS_GROUPS: [string, string, string[]][] = [
+  ["--syntax-keyword", "#007020", ["keyword", "selector-tag", "doctag", "name"]],
+  ["--syntax-type", "#902000", ["type", "built_in", "title.class_"]],
+  ["--syntax-function", "#06287e", ["title", "title.function_", "attr", "attribute"]],
+  ["--syntax-string", "#4070a0", ["string", "regexp", "symbol", "link", "char.escape_"]],
+  ["--syntax-number", "#40a070", ["number", "literal", "meta"]],
+  ["--syntax-comment", "#60a0b0", ["comment", "quote"]],
+  ["--syntax-variable", "#19177c", ["variable", "template-variable", "property"]],
+  ["--syntax-other", "#666666", ["operator", "selector-class", "selector-id"]],
+  ["--syntax-error", "#ff0000", ["deletion"]],
+];
+
+function highlightStylesheet(v: (name: string) => string): string {
+  const rules = HLJS_GROUPS.map(([variable, light, classes]) => {
+    // "title.function_" es `class="hljs-title function_"`: el punto ya arma ese selector.
+    const selector = classes.map((c) => `.hljs-${c}`).join(",");
+    return `${selector}{color:${v(variable) || light};}`;
+  });
+  return `<style>${rules.join("")}.hljs-comment,.hljs-quote{font-style:italic;}.hljs-section,.hljs-strong{font-weight:bold;}.hljs-emphasis{font-style:italic;}</style>`;
+}
+
 // Barras de desplazamiento de la vista previa, iguales a las de la app (styles.css): el
 // iframe es otro documento y no hereda esas reglas. `color-scheme` hace que lo que siga
 // siendo nativo (controles, esquinas) use la variante clara u oscura del tema. Solo van en la
@@ -90,7 +162,12 @@ function previewStyle(): string {
   const cs = getComputedStyle(document.documentElement);
   const zoom = cs.getPropertyValue("--text-zoom").trim() || "1";
   const v = (name: string) => cs.getPropertyValue(name).trim();
-  return markdownStylesheet(v) + `<style>body{font-size:calc(100% * ${zoom});}</style>` + scrollbarStyle(v);
+  return (
+    previewBaseStylesheet(v) +
+    markdownStylesheet(v) +
+    `<style>body{font-size:calc(100% * ${zoom});}</style>` +
+    scrollbarStyle(v)
+  );
 }
 
 // Tema para EXPORTAR: siempre la paleta CLARA, sin importar el tema activo. Un HTML o un
@@ -112,7 +189,7 @@ export function exportTheme(): { css: string; accent: string } {
   return theme;
 }
 
-// Inyecta el <style> del tema y el script de enlaces en el HTML standalone de pandoc (inline
+// Inyecta el <style> del tema y el script de enlaces en el documento HTML del backend (inline
 // -> anda en el iframe srcdoc sandboxeado).
 function withTheme(html: string): string {
   const head = previewStyle() + FRAME_SCRIPT;
@@ -182,11 +259,11 @@ export function postSync(pos: SyncPosition): void {
   if (previewWindowOpen) void emit("preview-sync", pos);
 }
 
-// Dibuja los diagramas Mermaid de `html` (con el tema activo) y lo muestra. `seq` descarta el
-// resultado si mientras tanto se pidió otro render.
+// Dibuja los diagramas Mermaid de `html` (con el tema activo), colorea el código y lo muestra.
+// `seq` descarta el resultado si mientras tanto se pidió otro render.
 async function show(html: string, seq: number): Promise<void> {
   const dark = document.documentElement.dataset.theme === "dark";
-  const shown = await renderMermaid(html, dark);
+  const shown = await highlightCode(await renderMermaid(html, dark));
   if (seq !== renderSeq) return;
   lastShownHtml = shown;
   preview.srcdoc = withTheme(shown);
@@ -214,7 +291,7 @@ export async function render(): Promise<void> {
   // "convirtiendo…"/"listo". Solo se avisa si falla (ademas del error en el panel).
   const seq = ++renderSeq;
   try {
-    // docId: pandoc resuelve las imagenes relativas contra la carpeta de ESTE documento.
+    // docId: las imagenes relativas se resuelven contra la carpeta de ESTE documento.
     const html = await invoke<string>("preview_markdown", { text: getText(), docId: activeDocId() });
     if (seq !== renderSeq) return; // llego tarde: ya se pidio otro
     lastPreviewHtml = html;

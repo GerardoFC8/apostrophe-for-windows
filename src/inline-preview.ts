@@ -27,9 +27,6 @@ export interface InlineLabels {
   footnote: string;
   footnoteMissing: string;
   math: string;
-  /// Color con el que se dibuja la fórmula. Sale de la paleta del tema activo: typst pinta
-  /// en negro por defecto, que en tema oscuro sería una fórmula invisible.
-  mathColor: string;
   /// Por qué no se pudo mostrar una imagen, por código. Rust manda el código y editor.ts lo
   /// traduce: la ruta sola dice DÓNDE mirar, no QUÉ está mal.
   imageProblem: Record<ImageProblem, string>;
@@ -112,25 +109,44 @@ function imageRow(
   return wrap;
 }
 
-/// Fórmula renderizada. Se pinta primero la fuente y se sustituye por el SVG cuando llega:
-/// el render tarda ~64 ms (dos procesos) y un popover que aparece vacío y luego salta se ve
-/// peor que uno que muestra algo desde el primer frame.
+/// Fórmula renderizada como MathML (ADR-0003), que WebView2 dibuja de forma nativa y toma el
+/// color del texto del tema. Se pinta primero la fuente y se sustituye cuando llega: un
+/// popover que aparece vacío y luego salta se ve peor que uno que muestra algo desde el
+/// primer frame.
 function mathRow(source: string, labels: InlineLabels): HTMLElement {
   const wrap = row(labels.math, source);
   const value = wrap.querySelector<HTMLElement>(".inline-preview-value")!;
-  void invoke<string>("render_math", { source, color: labels.mathColor })
-    .then((dataUri) => {
-      // <img> y NO innerHTML: un SVG incrustado así no ejecuta scripts que pudiera traer.
-      const img = document.createElement("img");
-      img.className = "inline-preview-math";
-      img.src = dataUri;
-      img.alt = source;
-      value.replaceChildren(img);
+  void invoke<string>("render_math", { source })
+    .then((mathml) => {
+      const math = safeMathml(mathml);
+      if (!math) return;
+      math.classList.add("inline-preview-math");
+      value.replaceChildren(math);
     })
     .catch(() => {
-      /* si el render falla queda la fuente, que ya es informativa */
+      /* si la fórmula no es válida queda la fuente, que ya es informativa */
     });
   return wrap;
+}
+
+const MATHML_NS = "http://www.w3.org/1998/Math/MathML";
+
+/// El elemento `<math>` de `mathml`, o `null` si trae algo que no sea MathML puro. El popover
+/// vive en la ventana principal, que tiene acceso a la API de Tauri: aunque el MathML lo arma
+/// el backend con el texto escapado, aquí no entra nada que pueda ejecutar código (elementos
+/// de otro espacio de nombres, `on…`, enlaces).
+function safeMathml(mathml: string): Element | null {
+  const doc = new DOMParser().parseFromString(mathml, "text/html");
+  const math = doc.body.firstElementChild;
+  if (!math || math.namespaceURI !== MATHML_NS || math.localName !== "math") return null;
+  for (const el of [math, ...math.querySelectorAll("*")]) {
+    if (el.namespaceURI !== MATHML_NS) return null;
+    for (const attr of el.attributes) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on") || name.includes("href") || name === "src") return null;
+    }
+  }
+  return document.importNode(math, true);
 }
 
 /// Extensión de CodeMirror que resuelve y muestra el popover.

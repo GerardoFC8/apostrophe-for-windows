@@ -31,6 +31,10 @@ chardetng = "1"
 # (ADR-0003). Puro, sin E/S. Sin las features por defecto: ni su CLI ni syntect (el
 # resaltado de codigo va en el frontend). `attributes` habilita `{#id .clase}`.
 comrak = { version = "0.59", default-features = false, features = ["attributes"] }
+# math-core: formulas LaTeX a MathML, que WebView2 dibuja de forma nativa (ADR-0003). Puro,
+# sin E/S, MIT. Elegido sobre pulldown-latex, latex2mathml y tex2math por cobertura (25/25
+# en el banco) y por escapar bien el texto. No limita la profundidad: ver `math::to_mathml`.
+math-core = "0.9"
 
 [features]
 serde = ["dep:serde"]

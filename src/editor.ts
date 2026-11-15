@@ -183,10 +183,6 @@ function documentExtensions(): Extension[] {
         footnote: t("inline.footnote"),
         footnoteMissing: t("inline.footnoteMissing"),
         math: t("inline.math"),
-        // Se lee en cada popover, no una vez: así sigue al tema activo sin recrear el editor.
-        mathColor: getComputedStyle(document.documentElement)
-          .getPropertyValue("--editor-fg")
-          .trim(),
         imageProblem: {
           remote: t("inline.imageRemote"),
           "no-base-dir": t("inline.imageNoBaseDir"),

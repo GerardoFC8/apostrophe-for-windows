@@ -1,6 +1,6 @@
-// Diagramas Mermaid en la vista previa. Un bloque ```mermaid sale de pandoc como
-// `<pre class="mermaid"><code>…</code></pre>`; aquí se reemplaza por el SVG del diagrama
-// antes de que el HTML llegue a la vista previa.
+// Diagramas Mermaid en la vista previa. Un bloque ```mermaid sale de comrak como
+// `<pre data-sourcepos="…"><code class="language-mermaid">…</code></pre>`; aquí se
+// reemplaza por el SVG del diagrama antes de que el HTML llegue a la vista previa.
 //
 // Se dibuja en la ventana principal y no dentro del iframe: Mermaid pesa varios megas, y el
 // iframe se vuelve a crear en cada render (cada vez que se escribe). Aquí se carga una sola
@@ -10,7 +10,7 @@
 
 type MermaidApi = typeof import("mermaid").default;
 
-const BLOCK = /<pre class="mermaid"><code>([\s\S]*?)<\/code><\/pre>/g;
+const BLOCK = /<pre[^>]*><code class="language-mermaid"[^>]*>([\s\S]*?)<\/code><\/pre>/g;
 /// Tope de la caché: una entrada por diagrama distinto (código + tema).
 const CACHE_LIMIT = 200;
 
@@ -24,9 +24,10 @@ function loadMermaid(): Promise<MermaidApi> {
   return api;
 }
 
-// El texto del bloque viene escapado como HTML (`--&gt;`): se decodifica para Mermaid.
+// El texto del bloque viene escapado como HTML (`--&gt;`): se decodifica para Mermaid. Va en
+// un <div> y no en un <pre>: el parser HTML descarta el salto de línea que sigue a <pre>.
 function decode(html: string): string {
-  const doc = new DOMParser().parseFromString(`<pre>${html}</pre>`, "text/html");
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
   return doc.body.textContent ?? "";
 }
 

@@ -32,21 +32,16 @@ use apostrophe_sidecars::sidecar_path;
 use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_window_state::StateFlags;
 
 /// Secuencia para nombrar temporales unicos por invocacion (evita choques entre
-/// previews concurrentes que dispara el debounce del frontend).
+/// exportaciones concurrentes).
 static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Convierte Markdown a HTML5 con pandoc via SIDECAR bundleado (M2). Escribimos el
-/// markdown a un archivo temporal y le pasamos la RUTA a pandoc: evita tener que
-/// cerrar el stdin del sidecar (el plugin no expone un EOF limpio) y es robusto en
-/// documentos grandes. Los flags los arma el Converter port del dominio.
-///
-/// TODO(ADR-0001): theme (`--css`), base_path, lua-filter y highlight-style cuando
-/// existan los assets de tema (M5).
+/// Convierte Markdown al HTML de la vista previa con comrak, dentro del proceso
+/// (ADR-0003): sin pandoc, sin archivos temporales y en pocos milisegundos. La conversion
+/// vive en el dominio (`apostrophe_core::preview`).
 ///
 /// Antes de devolverlo, las imagenes LOCALES del HTML se incrustan como data URI. El preview
 /// es un `iframe` con `srcdoc` en un sandbox: ahi un `src="C:/fotos/a.png"` se lee como URL
@@ -54,82 +49,23 @@ static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
 /// disco, que es el mismo criterio de `render_math` y `render_image`.
 #[tauri::command]
 async fn preview_markdown(
-    app: tauri::AppHandle,
     docs: tauri::State<'_, Docs>,
     text: String,
     doc_id: Option<DocId>,
 ) -> Result<String, String> {
     // El guard del Mutex no puede cruzar el `await`: se saca el directorio y se suelta.
     let doc_dir = target_doc_dir(&docs, doc_id);
-    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
-    let tmp = std::env::temp_dir().join(format!(
-        "apostrophe-preview-{}-{}.md",
-        std::process::id(),
-        seq
-    ));
-    std::fs::write(&tmp, text.as_bytes())
-        .map_err(|e| format!("no se pudo escribir el temporal de preview: {e}"))?;
 
-    // Args: <ruta-temporal> seguido de los flags puros del dominio (Converter port).
-    let mut args = vec![tmp.to_string_lossy().into_owned()];
-    args.extend(apostrophe_core::convert::preview_args(
-        &apostrophe_core::convert::PreviewOptions::default(),
-    ));
-
-    let result = run_pandoc_sidecar(&app, args).await;
-    let _ = std::fs::remove_file(&tmp); // limpieza best-effort, pase lo que pase
-    let html = result?;
-
-    // Leer y codificar cada imagen es I/O bloqueante: va fuera del hilo de eventos. Lo que
-    // no se pueda incrustar (remota, ausente, muy grande) conserva su `src` original.
+    // Convertir es CPU y leer cada imagen es I/O bloqueante: todo va fuera del hilo de
+    // eventos. Lo que no se pueda incrustar (remota, ausente, muy grande) conserva su `src`.
     tauri::async_runtime::spawn_blocking(move || {
+        let html = apostrophe_core::preview::render(&text);
         apostrophe_core::image::rewrite_img_srcs(&html, |src| {
             image_data_uri(src, doc_dir.as_deref()).ok()
         })
     })
     .await
-    .map_err(|e| format!("error al incrustar las imagenes del preview: {e}"))
-}
-
-/// Lanza el sidecar pandoc y junta su stdout. Aislado para mantener `preview_markdown`
-/// legible y garantizar el borrado del temporal aunque pandoc falle.
-async fn run_pandoc_sidecar(app: &tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
-    run_sidecar(app, "pandoc", args).await
-}
-
-/// Lanza un sidecar y junta su stdout. Falla con el stderr del proceso, que es lo unico
-/// util cuando pandoc o typst rechazan una entrada.
-async fn run_sidecar(
-    app: &tauri::AppHandle,
-    name: &str,
-    args: Vec<String>,
-) -> Result<String, String> {
-    let sidecar = app
-        .shell()
-        .sidecar(name)
-        .map_err(|e| format!("no se encontro el sidecar {name}: {e}"))?;
-    let (mut rx, _child) = sidecar
-        .args(args)
-        .spawn()
-        .map_err(|e| format!("no se pudo lanzar el sidecar {name}: {e}"))?;
-
-    let mut stdout: Vec<u8> = Vec::new();
-    let mut stderr = String::new();
-    let mut code: Option<i32> = None;
-    while let Some(event) = rx.recv().await {
-        match event {
-            CommandEvent::Stdout(chunk) => stdout.extend_from_slice(&chunk),
-            CommandEvent::Stderr(chunk) => stderr.push_str(&String::from_utf8_lossy(&chunk)),
-            CommandEvent::Error(err) => stderr.push_str(&err),
-            CommandEvent::Terminated(payload) => code = payload.code,
-            _ => {}
-        }
-    }
-
-    if code != Some(0) {
-        return Err(format!("{name} devolvio error (codigo {code:?}): {stderr}"));
-    }
-    String::from_utf8(stdout).map_err(|e| format!("la salida de {name} no es UTF-8: {e}"))
+    .map_err(|e| format!("error al generar la vista previa: {e}"))
 }
 
 /// Adaptador primario (IPC): expone el contador de stats del dominio. La logica
@@ -242,85 +178,21 @@ async fn inline_target(
         .map_err(|e| format!("error al resolver el objetivo inline: {e}"))
 }
 
-/// M20: renderiza una formula a SVG y la devuelve como DATA URI, lista para un `<img>`.
+/// M20: convierte una formula a MathML para el popover del editor (ADR-0003). Es la misma
+/// conversion que la vista previa, dentro del proceso: sin pandoc, typst ni temporales.
 ///
-/// El SVG viaja incrustado y no como archivo a proposito: asi el webview NUNCA necesita
-/// leer del disco y no hay que habilitarle el protocolo de assets de Tauri, que le abriria
-/// acceso al sistema de archivos. Un `<img>` con un SVG en data URI tampoco ejecuta scripts
-/// que pudieran venir dentro del SVG.
-///
-/// Son DOS pasos porque el math del markdown es sintaxis LaTeX y typst tiene la suya:
-/// pandoc traduce (`--to typst`) y typst dibuja. Medido en ~64 ms, aceptable para un hover.
+/// El error es un CODIGO estable (`invalid`, `too-complex`), no una frase: la copia visible
+/// vive en el catalogo de i18n del frontend. Hoy el popover, si falla, deja la fuente.
 #[tauri::command]
-async fn render_math(
-    app: tauri::AppHandle,
-    source: String,
-    color: String,
-) -> Result<String, String> {
-    use base64::Engine;
-
-    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir();
-    let md = dir.join(format!("apostrophe-math-{}-{}.md", std::process::id(), seq));
-    let typ = dir.join(format!(
-        "apostrophe-math-{}-{}.typ",
-        std::process::id(),
-        seq
-    ));
-    let svg = dir.join(format!(
-        "apostrophe-math-{}-{}.svg",
-        std::process::id(),
-        seq
-    ));
-
-    // Paso 1: LaTeX -> sintaxis typst, con el mismo pandoc que ya produce el preview.
-    std::fs::write(&md, format!("${source}$"))
-        .map_err(|e| format!("no se pudo escribir el temporal de la formula: {e}"))?;
-    let translated = run_pandoc_sidecar(
-        &app,
-        vec![
-            md.to_string_lossy().into_owned(),
-            "--from".into(),
-            "markdown".into(),
-            "--to".into(),
-            "typst".into(),
-        ],
-    )
-    .await;
-    let _ = std::fs::remove_file(&md);
-    let translated = translated?;
-
-    // Paso 2: dibujar. El documento (pagina al tamano de la formula, fondo transparente,
-    // color del tema) lo arma el dominio.
-    let document = apostrophe_core::math::typst_document(translated.trim(), &color);
-    std::fs::write(&typ, document)
-        .map_err(|e| format!("no se pudo escribir el documento typst: {e}"))?;
-
-    let engine = sidecar_path("typst")?;
-    if !engine.exists() {
-        return Err("Falta el motor de fórmulas. Ejecuta scripts/fetch-typst.ps1.".into());
-    }
-    let result = run_sidecar(
-        &app,
-        "typst",
-        vec![
-            "compile".into(),
-            typ.to_string_lossy().into_owned(),
-            svg.to_string_lossy().into_owned(),
-            "--format".into(),
-            "svg".into(),
-        ],
-    )
-    .await;
-    let _ = std::fs::remove_file(&typ);
-    result?;
-
-    let bytes = std::fs::read(&svg).map_err(|e| format!("no se pudo leer el SVG: {e}"))?;
-    let _ = std::fs::remove_file(&svg);
-    Ok(format!(
-        "data:image/svg+xml;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
+async fn render_math(source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        apostrophe_core::math::to_mathml(&source, false).map_err(|e| match e {
+            apostrophe_core::math::MathError::TooComplex => "too-complex".to_string(),
+            apostrophe_core::math::MathError::Invalid(_) => "invalid".to_string(),
+        })
+    })
+    .await
+    .map_err(|e| format!("error al convertir la formula: {e}"))?
 }
 
 /// M19 (imagenes): lee la imagen de un `![alt](url)` y la devuelve como DATA URI, lista

@@ -3,8 +3,9 @@
 // La correspondencia se hace título por título (outline.ts): se calcula en qué sección está
 // el renglón de arriba del editor y qué fracción de ella se recorrió, y la vista previa pone
 // arriba ese mismo título, desplazado en la misma proporción. Los títulos son lo único que
-// existe igual en los dos lados (pandoc no informa de qué renglón sale cada párrafo), y entre
-// uno y otro la interpolación es suficiente para leer a la par.
+// existe igual en los dos lados, y entre uno y otro la interpolación es suficiente para leer a
+// la par. Con comrak (ADR-0003) cada bloque trae `data-sourcepos`, su renglón en el original:
+// sincronizar por renglón queda como mejora posible.
 import { view } from "./editor";
 import { getHeadings, markSection, recentJump, sectionAt } from "./outline";
 

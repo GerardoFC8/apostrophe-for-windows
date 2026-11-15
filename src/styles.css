@@ -1408,12 +1408,13 @@ kbd {
 }
 /* ====================================================================== */
 
-/* M20: fórmula renderizada dentro del popover. El SVG viene con fondo transparente y en el
-   color del tema, así que solo hace falta acotar su tamaño. */
+/* M20: fórmula renderizada dentro del popover, en MathML (ADR-0003). Toma el color del
+   texto del tema; solo hace falta que una fórmula ancha se desplace en vez de desbordar. */
 .inline-preview-math {
   display: block;
   max-width: 100%;
-  max-height: 8em;
+  overflow-x: auto;
+  font-size: 1.15em;
 }
 
 /* Motivo por el que una imagen no se pudo mostrar. Va bajo la ruta, atenuado: es una

@@ -1,45 +1,125 @@
-//! Documento typst para renderizar una formula suelta (M20). Espejo de `latex_to_PNG.py`
-//! del upstream, que rasteriza las ecuaciones para mostrarlas en el popover inline.
+//! Formulas LaTeX a MathML (ADR-0003). WebView2 (Chromium) dibuja MathML Core de forma
+//! nativa: no hacen falta fuentes, scripts ni internet. Lo usan la vista previa y el
+//! popover de formulas del editor.
 //!
-//! Divergencia: upstream necesita una instalacion de LaTeX. Aca la formula pasa por el
-//! mismo par de binarios que ya se distribuyen — pandoc traduce el LaTeX del markdown a la
-//! sintaxis de typst, y typst la dibuja. Cero dependencias nuevas.
+//! La conversion la hace `math-core`. Su parser es recursivo y NO limita la profundidad: una
+//! formula muy anidada desborda la pila, y un desbordamiento no es un panico, cierra el
+//! proceso. Medido con 1 MB de pila (la del hilo principal en Windows): en debug alcanzan
+//! 10 fracciones anidadas, en release unas 300. Por eso hay dos defensas:
 //!
-//! Logica PURA: arma el fuente. El spawn de los dos procesos vive en el adaptador.
+//! 1. **Pila grande.** `to_mathml` convierte en un hilo propio con [`STACK_SIZE`] de pila
+//!    reservada. En Windows es solo reserva virtual: no se usa memoria si no hace falta.
+//!    `preview::render` hace lo mismo una vez por render y llama a [`convert`] adentro.
+//! 2. **Limite de complejidad.** La profundidad de la recursion no supera la cantidad de
+//!    elementos que pueden anidar (`{`, `\`, `^`, `_`, `(`, `[`). Con mas de [`MAX_TOKENS`]
+//!    la formula no se convierte. Ademas, ninguna formula de mas de [`MAX_BYTES`] se
+//!    convierte: cubre cualquier otra recursion de math-core que no se haya encontrado
+//!    (los parentesis se encontraron asi, en una revision: 32 000 anidados desbordaban 64 MB
+//!    en debug). Y no se aceptan macros (`\def`, `\newcommand`…): una macro recursiva
+//!    multiplicaria la profundidad sin agregar elementos. En la vista previa no sirven de
+//!    todos modos, porque cada formula se convierte por separado.
+//!
+//! Con 64 MB y 500 elementos, el peor caso medido en debug (fracciones con llaves, unos
+//! 100 KB por nivel y 3 elementos por nivel) usa unos 17 MB.
 
-/// Envuelve una expresion YA TRADUCIDA a sintaxis typst (por `pandoc --to typst`) en un
-/// documento minimo, listo para `typst compile --format svg`.
-///
-/// Decisiones del preambulo, todas necesarias para que la formula se integre en el popover:
-///
-/// - `width/height: auto` — la pagina se ajusta a la formula. Sin esto saldria una A4 con
-///   la ecuacion perdida en una esquina.
-/// - `fill: none` — fondo TRANSPARENTE. Es lo que permite que el mismo SVG sirva en tema
-///   claro y oscuro sin recortes blancos alrededor.
-/// - `text(fill: ...)` — el color lo manda el frontend desde la paleta activa. typst pinta
-///   en negro por defecto, que en tema oscuro seria una formula invisible sobre fondo
-///   oscuro: el sintoma seria "el popover aparece vacio".
-pub fn typst_document(typst_math: &str, text_color: &str) -> String {
-    format!(
-        "#set page(width: auto, height: auto, margin: 4pt, fill: none)\n\
-         #set text(size: 13pt, fill: rgb(\"{}\"))\n\
-         {}\n",
-        normalize_color(text_color),
-        typst_math
-    )
+use std::sync::OnceLock;
+
+use math_core::{LatexToMathML, MathCoreConfig, MathDisplay};
+
+/// Pila reservada para convertir. Ver el comentario del modulo.
+pub const STACK_SIZE: usize = 64 << 20;
+
+/// Maximo de elementos que pueden anidar (`{`, `\`, `^`, `_`, `(`, `[`) en una formula.
+pub const MAX_TOKENS: usize = 500;
+
+/// Largo maximo de una formula, en bytes. Una formula real cabe de sobra.
+pub const MAX_BYTES: usize = 20_000;
+
+/// Comandos que definen macros: no se aceptan (ver el comentario del modulo).
+const MACRO_COMMANDS: [&str; 5] = [
+    "def",
+    "gdef",
+    "newcommand",
+    "renewcommand",
+    "providecommand",
+];
+
+/// Por que una formula no se pudo convertir. El texto para la interfaz lo arma el
+/// frontend: el dominio no guarda copia.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MathError {
+    /// Demasiado compleja o con macros: no se intenta convertir.
+    TooComplex,
+    /// LaTeX invalido. Lleva el mensaje de `math-core`, en ingles.
+    Invalid(String),
 }
 
-/// typst quiere el hex SIN almohadilla dentro de `rgb("...")`. Se acepta con o sin ella para
-/// que quien llama pueda pasar la variable CSS tal cual la lee del tema.
-/// Un valor que no sea hex cae a negro: mejor una formula legible en claro que ninguna.
-fn normalize_color(color: &str) -> String {
-    let hex = color.trim().trim_start_matches('#');
-    let valid = matches!(hex.len(), 3 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit());
-    if valid {
-        hex.to_ascii_lowercase()
-    } else {
-        "000000".to_string()
+/// Convierte `latex` a un elemento `<math>`, en bloque si `display`. Corre en un hilo con
+/// pila grande: se puede llamar desde cualquier hilo.
+pub fn to_mathml(latex: &str, display: bool) -> Result<String, MathError> {
+    with_big_stack(|| convert(latex, display))
+}
+
+/// Como [`to_mathml`], pero en el hilo actual. Solo para quien ya corre con [`STACK_SIZE`]
+/// de pila, como `preview::render`.
+pub(crate) fn convert(latex: &str, display: bool) -> Result<String, MathError> {
+    if too_complex(latex) {
+        return Err(MathError::TooComplex);
     }
+    let mode = if display {
+        MathDisplay::Block
+    } else {
+        MathDisplay::Inline
+    };
+    converter()
+        .convert_with_local_state(latex, mode)
+        .map(|result| result.mathml)
+        .map_err(|e| MathError::Invalid(e.error_message()))
+}
+
+/// Corre `f` en un hilo con [`STACK_SIZE`] de pila y devuelve su resultado. Un panico de `f`
+/// se propaga a quien llama, como si hubiera corrido en su hilo.
+pub(crate) fn with_big_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("elision-math".into())
+            .stack_size(STACK_SIZE)
+            .spawn_scoped(scope, f)
+            // Crear un hilo solo falla sin memoria virtual; ahi no hay nada mejor que hacer.
+            .expect("no se pudo crear el hilo para convertir formulas")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+fn converter() -> &'static LatexToMathML {
+    static CONVERTER: OnceLock<LatexToMathML> = OnceLock::new();
+    CONVERTER.get_or_init(|| {
+        LatexToMathML::new(MathCoreConfig::default(), Vec::new())
+            .expect("sin macros propias, la configuracion por defecto es valida")
+    })
+}
+
+/// `true` si la formula supera [`MAX_BYTES`] o [`MAX_TOKENS`], o define macros.
+fn too_complex(latex: &str) -> bool {
+    if latex.len() > MAX_BYTES {
+        return true;
+    }
+    let tokens = latex
+        .chars()
+        .filter(|c| matches!(c, '{' | '\\' | '^' | '_' | '(' | '['))
+        .count();
+    tokens > MAX_TOKENS || defines_macro(latex)
+}
+
+fn defines_macro(latex: &str) -> bool {
+    latex.split('\\').skip(1).any(|rest| {
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
+        MACRO_COMMANDS.contains(&name.as_str())
+    })
 }
 
 #[cfg(test)]
@@ -47,52 +127,100 @@ mod tests {
     use super::*;
 
     #[test]
-    fn la_pagina_se_ajusta_a_la_formula_y_es_transparente() {
-        let d = typst_document("$ x $", "#2e3436");
-        assert!(d.contains("width: auto"), "sin esto saldria una A4: {d}");
-        assert!(d.contains("height: auto"));
-        assert!(
-            d.contains("fill: none"),
-            "el fondo debe ser transparente: {d}"
-        );
+    fn convierte_en_linea_y_en_bloque() {
+        let inline = to_mathml("E = mc^2", false).unwrap();
+        assert!(inline.starts_with("<math"), "{inline}");
+        assert!(!inline.contains("display=\"block\""), "{inline}");
+        assert!(inline.contains("<msup>"), "{inline}");
+
+        let block = to_mathml(r"\frac{a}{b}", true).unwrap();
+        assert!(block.contains("display=\"block\""), "{block}");
+        assert!(block.contains("<mfrac>"), "{block}");
     }
 
     #[test]
-    fn el_color_del_texto_viene_del_tema() {
-        // En tema oscuro, el negro por defecto de typst daria una formula invisible.
-        let d = typst_document("$ x $", "#deddda");
-        assert!(d.contains(r#"rgb("deddda")"#), "{d}");
-    }
-
-    #[test]
-    fn el_color_se_acepta_con_o_sin_almohadilla() {
-        // La var CSS del tema llega con `#`; typst la quiere sin ella.
-        assert!(typst_document("$ x $", "#2E3436").contains(r#"rgb("2e3436")"#));
-        assert!(typst_document("$ x $", "2e3436").contains(r#"rgb("2e3436")"#));
-    }
-
-    #[test]
-    fn un_color_invalido_cae_a_negro_en_vez_de_romper_el_render() {
-        // typst abortaria con un color mal formado y el popover quedaria vacio sin
-        // explicacion. Negro es legible en claro, que es el caso por defecto.
-        for malo in ["", "rojo", "#12345", "#zzzzzz", "rgb(1,2,3)"] {
-            let d = typst_document("$ x $", malo);
-            assert!(d.contains(r#"rgb("000000")"#), "con {malo:?}: {d}");
+    fn cubre_entornos_y_letras_especiales() {
+        for latex in [
+            r"\begin{cases} 1 & x > 0 \\ 0 & \text{si no} \end{cases}",
+            r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+            r"\begin{aligned} a &= b \\ c &= d \end{aligned}",
+            r"\mathbb{R} \to \mathbf{v}",
+            r"\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}",
+        ] {
+            assert!(to_mathml(latex, true).is_ok(), "{latex}");
         }
     }
 
     #[test]
-    fn se_aceptan_las_formas_hex_de_3_6_y_8_digitos() {
-        assert!(typst_document("$ x $", "#abc").contains(r#"rgb("abc")"#));
-        assert!(typst_document("$ x $", "#aabbcc").contains(r#"rgb("aabbcc")"#));
-        assert!(typst_document("$ x $", "#aabbccdd").contains(r#"rgb("aabbccdd")"#));
+    fn el_latex_invalido_es_un_error_sin_panico() {
+        for latex in [r"\frac{a}", "x^", "{", r"\unknowncommand{x}"] {
+            assert!(
+                matches!(to_mathml(latex, false), Err(MathError::Invalid(_))),
+                "{latex}"
+            );
+        }
     }
 
     #[test]
-    fn la_formula_va_al_final_intacta() {
-        // Lo que devuelve pandoc no se toca: cualquier retoque nuestro seria una segunda
-        // traduccion compitiendo con la suya.
-        let d = typst_document("$a / b + sqrt(x^2 + 1)$", "#000");
-        assert!(d.trim_end().ends_with("$a / b + sqrt(x^2 + 1)$"), "{d}");
+    fn el_texto_se_escapa() {
+        let html = to_mathml(r"\text{<img src=x onerror=alert(1)>}", false).unwrap();
+        assert!(!html.contains("<img"), "{html}");
+    }
+
+    #[test]
+    fn una_formula_muy_anidada_no_cierra_la_app() {
+        // Sin las defensas, 300 fracciones anidadas desbordan la pila y abortan el proceso
+        // de pruebas entero (no es un panico que se pueda atrapar).
+        let deep = format!("{}x{}", r"\frac{1}{".repeat(300), "}".repeat(300));
+        assert_eq!(to_mathml(&deep, false), Err(MathError::TooComplex));
+    }
+
+    #[test]
+    fn el_anidamiento_justo_bajo_el_limite_se_convierte() {
+        // 166 fracciones = 498 elementos: el peor caso que sigue convirtiendose. Si la pila
+        // no alcanzara, este test abortaria el proceso.
+        let deep = format!("{}x{}", r"\frac{1}{".repeat(166), "}".repeat(166));
+        assert!(to_mathml(&deep, false).is_ok());
+        let chain = format!("{}x", r"\sqrt ".repeat(MAX_TOKENS));
+        assert!(to_mathml(&chain, false).is_ok());
+        let parens = format!("{}x{}", "(".repeat(MAX_TOKENS), ")".repeat(MAX_TOKENS));
+        assert!(to_mathml(&parens, false).is_ok());
+    }
+
+    #[test]
+    fn los_parentesis_y_corchetes_anidados_tambien_tienen_limite() {
+        // Hallado en revision: 32 000 parentesis anidados desbordaban la pila en debug y
+        // cerraban la app. Con el limite ni se intenta convertir.
+        for (open, close) in [("(", ")"), ("[", "]")] {
+            let deep = format!("{}x{}", open.repeat(100_000), close.repeat(100_000));
+            assert_eq!(to_mathml(&deep, false), Err(MathError::TooComplex));
+        }
+    }
+
+    #[test]
+    fn una_formula_muy_larga_no_se_convierte() {
+        let long = "x+".repeat(MAX_BYTES);
+        assert_eq!(to_mathml(&long, false), Err(MathError::TooComplex));
+        // Larga pero dentro del tope: se convierte.
+        assert!(to_mathml(&"x+".repeat(5_000), false).is_ok());
+    }
+
+    #[test]
+    fn las_macros_no_se_aceptan() {
+        for latex in [
+            r"\def\a{\a}\a",
+            r"\newcommand{\b}{x}\b",
+            r"\renewcommand{\c}{x}",
+            r"\gdef\d{x}",
+            r"\providecommand{\e}{x}",
+        ] {
+            assert_eq!(
+                to_mathml(latex, false),
+                Err(MathError::TooComplex),
+                "{latex}"
+            );
+        }
+        // Un comando que solo empieza igual no es una macro.
+        assert!(to_mathml(r"\delta", false).is_ok());
     }
 }
