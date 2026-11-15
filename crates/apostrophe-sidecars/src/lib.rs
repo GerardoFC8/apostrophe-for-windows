@@ -31,17 +31,35 @@ pub fn install_dir() -> Result<PathBuf, String> {
 
 /// Regla pura detras de [`install_dir`]: la carpeta que contiene `exe`.
 ///
-/// Bajo `cargo test` el binario de pruebas queda en `target/<perfil>/deps/`, pero
-/// `tauri-build` copia los sidecars a `target/<perfil>/`: en ese caso se sube un nivel. Es
-/// la misma regla de `relative_command_path` en tauri-plugin-shell.
+/// Bajo `cargo test` el binario de pruebas no esta junto a los sidecars, que `tauri-build`
+/// copia a `target/<perfil>/`: en ese caso se devuelve esa carpeta (ver
+/// [`cargo_profile_dir`]). Fuera de cargo, la carpeta del ejecutable sin mas.
 pub fn install_dir_of(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent().filter(|d| !d.as_os_str().is_empty())?;
-    let base = if dir.ends_with("deps") {
-        dir.parent().unwrap_or(dir)
+    Some(cargo_profile_dir(dir).unwrap_or(dir).to_path_buf())
+}
+
+/// `target/<perfil>/` si `dir` es una de las carpetas donde cargo deja los binarios de
+/// pruebas; `None` si no lo es.
+///
+/// - Hasta Rust 1.99: `target/<perfil>/deps/`. Es la regla de `relative_command_path` en
+///   tauri-plugin-shell.
+/// - Desde Rust 1.100: `target/<perfil>/build/<paquete>/<hash>/out/` (el diseño nuevo de
+///   carpetas de cargo). Se exige la forma completa, `out` tres niveles bajo `build`, para
+///   no confundir una instalacion real que por casualidad este en una carpeta `out`.
+fn cargo_profile_dir(dir: &Path) -> Option<&Path> {
+    if dir.ends_with("deps") {
+        return dir.parent();
+    }
+    if !dir.ends_with("out") {
+        return None;
+    }
+    let build = dir.parent()?.parent()?.parent()?;
+    if build.ends_with("build") {
+        build.parent()
     } else {
-        dir
-    };
-    Some(base.to_path_buf())
+        None
+    }
 }
 
 /// Ruta de un sidecar dentro de `dir`: el nombre pelado (Tauri quita el target triple al
@@ -132,17 +150,44 @@ mod tests {
     }
 
     #[test]
+    fn con_el_diseno_nuevo_de_cargo_se_sube_hasta_el_perfil() {
+        // Desde Rust 1.100, `cargo test` deja el binario de pruebas en
+        // `target/<perfil>/build/<paquete>/<hash>/out/`.
+        let exe = Path::new("target")
+            .join("debug")
+            .join("build")
+            .join("apostrophe-cli")
+            .join("cda498e67199a8c7")
+            .join("out")
+            .join("run-cda498e67199a8c7");
+        assert_eq!(
+            install_dir_of(&exe),
+            Some(Path::new("target").join("debug"))
+        );
+    }
+
+    #[test]
+    fn una_instalacion_en_una_carpeta_out_no_se_confunde_con_cargo() {
+        // Solo la forma completa `build/<paquete>/<hash>/out` es de cargo.
+        let dir = Path::new("C:\\").join("herramientas").join("out");
+        let exe = dir.join(exe_name("elision"));
+        assert_eq!(install_dir_of(&exe), Some(dir));
+    }
+
+    #[test]
     fn un_ejecutable_sin_carpeta_no_tiene_instalacion() {
         assert_eq!(install_dir_of(Path::new("")), None);
     }
 
     #[test]
     fn la_instalacion_real_es_absoluta_y_no_es_deps() {
-        // El binario de este test vive en `target/<perfil>/deps/`: la regla tiene que
-        // devolver la carpeta de arriba, ya resuelta a ruta absoluta.
+        // El binario de este test vive en `target/<perfil>/deps/` (o, desde Rust 1.100,
+        // en `target/<perfil>/build/<paquete>/<hash>/out/`): la regla tiene que devolver
+        // `target/<perfil>/`, ya resuelta a ruta absoluta.
         let dir = install_dir().expect("deberia ubicarse el ejecutable de pruebas");
         assert!(dir.is_absolute(), "{}", dir.display());
         assert!(!dir.ends_with("deps"), "{}", dir.display());
+        assert!(!dir.ends_with("out"), "{}", dir.display());
         assert_eq!(
             sidecar_path("pandoc").unwrap(),
             sidecar_path_in(&dir, "pandoc")
