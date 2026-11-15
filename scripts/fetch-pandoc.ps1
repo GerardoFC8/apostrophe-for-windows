@@ -17,6 +17,11 @@
 param(
     # Version pineada para builds reproducibles. Bumpear a mano cuando se quiera.
     [string]$Version = "3.9.0.2",
+    # SHA-256 del zip oficial de esa version. Sale del `digest` que GitHub publica para cada
+    # archivo de una release (api.github.com/repos/jgm/pandoc/releases/tags/<version>).
+    # Al cambiar -Version hay que cambiar tambien este valor: si no coinciden, el script falla
+    # en vez de meter en el instalador un binario que nadie verifico.
+    [string]$Sha256 = "c97542f2800f446e788d9f74237856d995421ad1bb3cc8324286840c5f272d3a",
     # Target triple del sidecar (coincide con el host MSVC de Windows x64).
     [string]$Triple = "x86_64-pc-windows-msvc"
 )
@@ -38,6 +43,15 @@ $extract = Join-Path $env:TEMP "pandoc-$Version-extract"
 
 Write-Host "Descargando pandoc $Version..."
 Invoke-WebRequest -Uri $url -OutFile $zip
+
+# Se verifica ANTES de extraer: un zip corrupto o manipulado no llega a tocar el disco del
+# proyecto ni, por lo tanto, el instalador.
+$actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+if ($actual -ne $Sha256.ToLowerInvariant()) {
+    Remove-Item -Force $zip
+    throw "El SHA-256 del zip de pandoc $Version no coincide.`n  esperado: $Sha256`n  obtenido: $actual"
+}
+Write-Host "SHA-256 verificado."
 
 if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
 Expand-Archive -Path $zip -DestinationPath $extract -Force

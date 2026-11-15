@@ -31,6 +31,12 @@
 param(
     # Version pineada para builds reproducibles. Bumpear a mano cuando se quiera.
     [string]$Version = "0.15.1",
+    # SHA-256 del zip oficial de esa version. Sale del `digest` que GitHub publica para cada
+    # archivo de una release (api.github.com/repos/typst/typst/releases/tags/v<version>).
+    # Al cambiar -Version hay que cambiar tambien este valor: si no coinciden, el script falla
+    # en vez de meter en el instalador un binario que nadie verifico. typst.exe no viene
+    # firmado, asi que este hash es la unica verificacion.
+    [string]$Sha256 = "19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736",
     # Target triple del sidecar (coincide con el host MSVC de Windows x64).
     [string]$Triple = "x86_64-pc-windows-msvc"
 )
@@ -52,6 +58,15 @@ $extract = Join-Path $env:TEMP "typst-$Version-extract"
 
 Write-Host "Descargando typst $Version..."
 Invoke-WebRequest -Uri $url -OutFile $zip
+
+# Se verifica ANTES de extraer: un zip corrupto o manipulado no llega a tocar el disco del
+# proyecto ni, por lo tanto, el instalador.
+$actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+if ($actual -ne $Sha256.ToLowerInvariant()) {
+    Remove-Item -Force $zip
+    throw "El SHA-256 del zip de typst $Version no coincide.`n  esperado: $Sha256`n  obtenido: $actual"
+}
+Write-Host "SHA-256 verificado."
 
 if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
 Expand-Archive -Path $zip -DestinationPath $extract -Force
