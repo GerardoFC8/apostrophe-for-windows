@@ -164,7 +164,7 @@ export const FRAME_SCRIPT = `<script>
     window.scrollTo(0, target);
   }
 
-  // Actualización sin recrear el documento: la ventana manda solo el <body> nuevo y aquí se
+  // Actualización sin recrear el documento: la ventana manda solo el cuerpo nuevo y aquí se
   // reemplazan los bloques que cambiaron. Se compara desde el principio y desde el final (una
   // edición suele tocar un solo lugar); a los bloques iguales solo se les copia el
   // "data-sourcepos", que cambia en todos los que siguen a un renglón agregado. Así no hay
@@ -174,7 +174,7 @@ export const FRAME_SCRIPT = `<script>
   var NOISE = / (data-sourcepos|decoding)="[^"]*"/g;
   function keyOf(node) {
     // Los espacios entre bloques no se ven, y al cargar el documento completo el parser pega
-    // al final del body el salto que sigue a "</body>": si contaran, la comparación desde el
+    // al final del body el salto que sigue al cierre del body: si contaran, la comparación desde el
     // final fallaría siempre en el último nodo.
     if (node.nodeType === 3 && node.nodeValue.trim() === "") return "#ws";
     if (node.nodeType !== 1) return "#" + node.nodeType + ":" + node.nodeValue;
@@ -321,7 +321,9 @@ export function frameUpdater(frame: HTMLIFrameElement): FrameUpdater {
   return {
     show(html) {
       const headEnd = html.indexOf("</head>");
-      const bodyStart = html.indexOf("<body>");
+      // El <body> se busca DESPUÉS del head: el head lleva este mismo script y sus estilos, y
+      // cualquier "<body>" escrito ahí (en un comentario, por ejemplo) se tomaría por el real.
+      const bodyStart = html.indexOf("<body>", Math.max(0, headEnd));
       const bodyEnd = html.lastIndexOf("</body>");
       const nextHead = headEnd >= 0 ? html.slice(0, headEnd) : "";
       if (ready && nextHead === head && bodyStart >= 0 && bodyEnd > bodyStart) {
