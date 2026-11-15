@@ -27,6 +27,10 @@ encoding_rs = "0.8"
 # chardetng: detector de encoding para contenido legacy (misma familia que encoding_rs).
 # API 1.x usa enums Iso2022JpDetection/Utf8Detection en lugar de bools (cambio de 0.x).
 chardetng = "1"
+# comrak: Markdown (CommonMark + GFM) a HTML para la vista previa, dentro del proceso
+# (ADR-0003). Puro, sin E/S. Sin las features por defecto: ni su CLI ni syntect (el
+# resaltado de codigo va en el frontend). `attributes` habilita `{#id .clase}`.
+comrak = { version = "0.59", default-features = false, features = ["attributes"] }
 
 [features]
 serde = ["dep:serde"]
