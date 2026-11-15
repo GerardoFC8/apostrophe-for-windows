@@ -72,10 +72,14 @@ de la app para que quien ya la tenía siga recibiendo las actualizaciones.
 
 **Ver el resultado**
 
-- **Vista previa en vivo** mientras escribes.
+- **Vista previa en vivo** mientras escribes, al instante incluso en documentos largos.
 - **Scroll sincronizado:** la vista previa acompaña al editor, título por título.
-- **Diagramas Mermaid:** un bloque ` ```mermaid ` se dibuja como diagrama, sin conexión a
-  internet.
+- **Fórmulas** (`$…$` y `$$…$$`), **código coloreado** y **diagramas Mermaid** (un bloque
+  ` ```mermaid `), todo sin conexión a internet.
+- **Alertas** al estilo de GitHub (`> [!NOTE]`, `> [!WARNING]`…) y `==resaltado==`.
+- La vista previa entiende Markdown con las extensiones de GitHub (tablas, tareas, notas al
+  pie) y algunas de pandoc. Lo que no muestra se ve igual al exportar: ver
+  [qué cambia entre la vista previa y el export](#vista-previa-y-export).
 - **Vista previa en una ventana aparte**, con opacidad del fondo y opción de dejarla
   siempre visible (los controles aparecen al pasar el mouse por la ventana).
 
@@ -85,6 +89,21 @@ de la app para que quien ya la tenía siga recibiendo las actualizaciones.
   desplegable "Guardar como tipo" del diálogo.
 - Los motores de conversión (pandoc y typst) vienen incluidos: no necesitas instalar nada
   más.
+
+#### Vista previa y export
+
+La vista previa la dibuja la propia app y el export lo hace pandoc, que entiende más
+sintaxis. Esto se ve en el export pero **no en la vista previa**:
+
+- Tablas de cuadrícula (`+---+`) y tablas simples (columnas alineadas con espacios). Las
+  tablas con barras (`| a | b |`) sí se ven.
+- Listas con letras o números romanos (`a.`, `i.`) y listas de ejemplos (`(@)`).
+- Bloques de versos (`| línea`).
+- Texto con clase (`[texto]{.clase}`) y bloques `:::` con atributos entre llaves
+  (`::: {.aviso #id}`); `::: aviso` sí se ve.
+- Comandos de LaTeX fuera de una fórmula (`\textbf{…}`).
+
+El detalle está en [`docs/adr/0003-vista-previa-con-comrak.md`](docs/adr/0003-vista-previa-con-comrak.md).
 
 **Automatizar**
 
@@ -287,8 +306,10 @@ carpeta de instalación.
 
 Elision está construido con **Tauri 2 + Rust** bajo una arquitectura hexagonal (ver
 [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
-El editor es CodeMirror 6, la vista previa y la exportación usan **pandoc** y **typst**
-como sidecars incluidos, y el corrector es Hunspell vía `spellbook`, en Rust puro.
+El editor es CodeMirror 6. La vista previa usa **comrak** dentro del proceso (ver
+[`docs/adr/0003-vista-previa-con-comrak.md`](docs/adr/0003-vista-previa-con-comrak.md)), la
+exportación usa **pandoc** y **typst** como sidecars incluidos, y el corrector es Hunspell
+vía `spellbook`, en Rust puro.
 
 ### Requisitos
 

@@ -62,8 +62,8 @@ comunes y las propias del Markdown de pandoc. comrak con las extensiones de la s
 **Iguales o equivalentes:** encabezados (mismos `id`, con acentos), énfasis, tachado,
 subíndice y superíndice, enlaces, notas al pie (también las en línea `^[…]`), listas de
 tareas, listas numeradas, listas de definición, citas, tablas con barras (con
-alineación), divs con `:::` y clase, HTML crudo, salto de línea con `\`, regla horizontal
-y comillas y guiones tipográficos.
+alineación), divs con `:::` y una clase simple (`::: aviso`), HTML crudo, salto de línea
+con `\`, regla horizontal y comillas y guiones tipográficos.
 
 **Mejor con comrak:**
 - `==resaltado==` sale como `<mark>`; pandoc lo deja literal.
@@ -88,7 +88,30 @@ y comillas y guiones tipográficos.
 | Listas con letras o romanos (`a.`, `i.`) y de ejemplos (`(@)`) | Lista | Párrafo | **Limitación aceptada** |
 | Bloques de versos (`\| …`) | Conserva saltos y sangría | Párrafo | **Limitación aceptada** |
 | Spans con clase (`[texto]{.clase}`) | `<span class>` | Texto literal | **Limitación aceptada** |
+| Divs con atributos (`::: {.aviso #x}`) | `<div class id>` | La clase es el texto entre llaves, escapado | **Limitación aceptada** |
+| Encabezado sin numerar (`# T {-}`) | Quita el `{-}` | Lo deja en el texto | **Limitación aceptada** |
 | LaTeX crudo (`\textbf{…}`) | Lo descarta en HTML | Lo muestra literal | **Limitación aceptada** |
+
+### Ajustes tras la revisión de la implementación
+
+Una revisión independiente del cambio encontró diferencias que no salían en la comparación
+de arriba. Se corrigieron así:
+
+- **Esquema y scroll sincronizado:** `outline.rs` seguía las reglas de pandoc (por ejemplo,
+  exigir una línea en blanco antes de un título) y dejó de coincidir con los títulos de la
+  vista previa. Ahora el esquema sale del mismo árbol de comrak, con las mismas opciones.
+  Un test compara las dos listas.
+- **`$$` de varios renglones:** en CommonMark, un renglón que empieza con `+`, `-` o `>`
+  corta el párrafo, y la fórmula terminaba partida en una lista. Antes de parsear, un bloque
+  `$$` solo en su renglón pasa a ```` ```math ```` sin cambiar la cantidad de renglones.
+  Los bloques ```` ```math ```` que escriba el usuario también se dibujan como fórmula.
+- **Superíndice y subíndice con espacios** (`x^2 y z^3`): salen literales, como en pandoc.
+- **YAML:** se acepta el cierre con `...`, los bloques `title: |` y `>`, las listas
+  `author: [Ana, Luis]` y los comentarios al final del renglón.
+- **```` ```{.python} ````:** el lenguaje se toma de la clase.
+- **Fórmulas que cierran la app:** los paréntesis y corchetes anidados también desbordaban
+  la pila de math-core. Ahora cuentan para el límite de complejidad, y además hay un tope
+  de 20 000 bytes por fórmula.
 
 Las limitaciones aceptadas siguen funcionando **al exportar**, porque el export sigue con
 pandoc. Solo se ven distinto en la vista previa.
@@ -113,7 +136,7 @@ HTML crudo pasa, como con pandoc) y `render.sourcepos`.
 
 | Pieza | Cambio |
 |---|---|
-| `apostrophe-core` | Nuevo `preview::render(md) -> String`: comrak más los agregados (encabezado YAML, figuras, atributos, MathML). Puro y con tests. |
+| `apostrophe-core` | Nuevo `preview::render(md) -> String`: comrak más los agregados (encabezado YAML, figuras, atributos, MathML). Puro y con tests. `outline` lee el mismo árbol. `math::to_mathml` convierte con math-core en un hilo con 64 MB de pila y rechaza fórmulas demasiado complejas o con macros. |
 | `src-tauri` | `preview_markdown` llama al dominio en `spawn_blocking`; ya no hay temporal ni sidecar. Sigue incrustando las imágenes. |
 | `src/` | Plantilla mínima (lo que daba `--standalone`), CSS de notas al pie y tareas, patrón de Mermaid, resaltado de código. |
 | `convert.rs` | `PreviewOptions` y `preview_args` se retiran; `export_args` no cambia. |
@@ -128,6 +151,13 @@ con una prueba de cobertura sobre fórmulas reales:
 1. **Preferida:** un crate de Rust en el dominio (ADR-0001: ante la duda, Rust).
 2. **Alternativa:** KaTeX con salida `mathml` en la ventana principal, cargado solo si hay
    fórmulas, igual que Mermaid hoy.
+
+**Elegido: `math-core` 0.9** (MIT). En un banco de 25 fórmulas (fracciones, integrales,
+matrices, `cases`, `aligned`, `\mathbb`, `\text`…) convirtió las 25 bien. Le siguieron
+`pulldown-latex` (convierte todas, con defectos visibles en acentos y operadores, y necesita
+su hoja de estilos), `latex2mathml` (22/25, abandonado desde 2020) y `tex2math` (LGPL, casi
+sin uso). Suma unos 290 KB y tarda unos 1,5 µs por fórmula. No limita la profundidad de su
+parser recursivo: ver las defensas en `crates/apostrophe-core/src/math.rs`.
 
 ### Resaltado de código: en el frontend
 

@@ -72,10 +72,14 @@ existing users keep getting updates.
 
 **See the result**
 
-- **Live preview** as you type.
+- **Live preview** as you type, instant even for long documents.
 - **Synced scrolling:** the preview follows the editor, heading by heading.
-- **Mermaid diagrams:** a ` ```mermaid ` block is drawn as a diagram, with no internet
-  connection.
+- **Formulas** (`$…$` and `$$…$$`), **highlighted code** and **Mermaid diagrams** (a
+  ` ```mermaid ` block), all with no internet connection.
+- GitHub-style **alerts** (`> [!NOTE]`, `> [!WARNING]`…) and `==highlight==`.
+- The preview understands Markdown with GitHub's extensions (tables, task lists,
+  footnotes) and some of pandoc's. What it doesn't show still exports: see
+  [what differs between preview and export](#preview-and-export).
 - **Preview in a separate window**, with background opacity and an option to keep it always
   on top (the controls appear when the mouse is over the window).
 
@@ -84,6 +88,21 @@ existing users keep getting updates.
 - To **PDF, HTML, ODT, DOCX, EPUB and LaTeX** with `Ctrl+E`. Pick the format from the
   dialog's "Save as type" dropdown.
 - The conversion engines (pandoc and typst) are bundled: there is nothing else to install.
+
+#### Preview and export
+
+The app draws the preview itself, and pandoc, which understands more syntax, does the
+export. These show up in exports but **not in the preview**:
+
+- Grid tables (`+---+`) and simple tables (columns aligned with spaces). Pipe tables
+  (`| a | b |`) do show.
+- Lists numbered with letters or Roman numerals (`a.`, `i.`) and example lists (`(@)`).
+- Line blocks (`| line`).
+- Text with a class (`[text]{.class}`) and `:::` blocks with attributes in braces
+  (`::: {.note #id}`); `::: note` does show.
+- LaTeX commands outside a formula (`\textbf{…}`).
+
+Details in [`docs/adr/0003-vista-previa-con-comrak.md`](docs/adr/0003-vista-previa-con-comrak.md).
 
 **Automate**
 
@@ -287,8 +306,10 @@ installation folder.
 
 Elision is built with **Tauri 2 + Rust** on a hexagonal architecture (see
 [`docs/adr/0001-frontera-dominio-presentacion.md`](docs/adr/0001-frontera-dominio-presentacion.md)).
-The editor is CodeMirror 6, the preview and export use **pandoc** and **typst** as bundled
-sidecars, and the spell checker is Hunspell via `spellbook`, in pure Rust.
+The editor is CodeMirror 6. The preview uses **comrak** in-process (see
+[`docs/adr/0003-vista-previa-con-comrak.md`](docs/adr/0003-vista-previa-con-comrak.md)),
+export uses **pandoc** and **typst** as bundled sidecars, and the spell checker is
+Hunspell via `spellbook`, in pure Rust.
 
 ### Requirements
 
