@@ -8,7 +8,7 @@ import { flashStatus } from "./status";
 import { getLocale, t } from "./i18n";
 import { renderMermaid } from "./mermaid-diagrams";
 import { highlightCode } from "./code-highlight";
-import { FRAME_SCRIPT, frameMessage } from "./preview-frame";
+import { FRAME_SCRIPT, frameMessage, frameUpdater } from "./preview-frame";
 import type { FrameMessage } from "./preview-frame";
 import type { SyncPosition } from "./scroll-sync";
 
@@ -225,8 +225,16 @@ export interface PreviewFrameDeps {
   onScrolled: (pos: SyncPosition) => void;
 }
 
+// Muestra el HTML en el panel sin recrear el iframe salvo que haga falta (ver frameUpdater).
+const previewFrame = frameUpdater(preview);
+// Vuelve a mandar la posición del scroll sincronizado (scroll-sync.ts). Se fija al arrancar.
+let resync: () => void = () => {};
+
 function handleFrameMessage(msg: FrameMessage, deps: PreviewFrameDeps): void {
-  if (msg.kind === "ready") deps.onReady();
+  if (msg.kind === "ready") {
+    previewFrame.markReady();
+    deps.onReady();
+  }
   else if (msg.kind === "scrolled") deps.onScrolled(msg.pos);
   else if (msg.kind === "link") void followLink(msg.href, deps.openMarkdown);
   else if (msg.kind === "zoom") deps.zoomStep(msg.step);
@@ -237,6 +245,7 @@ function handleFrameMessage(msg: FrameMessage, deps: PreviewFrameDeps): void {
 // ventana desacoplada, que no resuelve nada por su cuenta: reenvia el mensaje y se atiende
 // aca, con el documento activo como base de los enlaces.
 export function initPreviewFrame(deps: PreviewFrameDeps): void {
+  resync = deps.onReady;
   window.addEventListener("message", (e) => {
     const msg = frameMessage(e, preview);
     if (msg) handleFrameMessage(msg, deps);
@@ -266,7 +275,10 @@ async function show(html: string, seq: number): Promise<void> {
   const shown = await highlightCode(await renderMermaid(html, dark));
   if (seq !== renderSeq) return;
   lastShownHtml = shown;
-  preview.srcdoc = withTheme(shown);
+  previewFrame.show(withTheme(shown));
+  // Sin recarga no llega "listo": se manda la posición igual. Al cambiar de pestaña cambia
+  // el documento entero y la vista previa tiene que ir al renglón de la pestaña nueva.
+  resync();
   pushToPreviewWindow(); // M18: si hay ventana desacoplada, se actualiza con el mismo HTML
 }
 
@@ -300,8 +312,10 @@ export async function render(): Promise<void> {
     if (seq !== renderSeq) return;
     flashStatus(t("status.previewFailed"), 4000);
     // Con la hoja del tema: en el oscuro, el error no debe aparecer en un recuadro blanco.
-    preview.srcdoc = withTheme(
-      `<pre style="color:#e01b24;background:none;border:0;white-space:pre-wrap">${escapeHtml(String(err))}</pre>`,
+    previewFrame.show(
+      withTheme(
+        `<pre style="color:#e01b24;background:none;border:0;white-space:pre-wrap">${escapeHtml(String(err))}</pre>`,
+      ),
     );
   }
 }

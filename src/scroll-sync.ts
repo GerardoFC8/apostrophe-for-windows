@@ -1,45 +1,35 @@
 // Scroll sincronizado: al desplazar el editor, la vista previa acompaña.
 //
-// La correspondencia se hace título por título (outline.ts): se calcula en qué sección está
-// el renglón de arriba del editor y qué fracción de ella se recorrió, y la vista previa pone
-// arriba ese mismo título, desplazado en la misma proporción. Los títulos son lo único que
-// existe igual en los dos lados, y entre uno y otro la interpolación es suficiente para leer a
-// la par. Con comrak (ADR-0003) cada bloque trae `data-sourcepos`, su renglón en el original:
-// sincronizar por renglón queda como mejora posible.
+// La correspondencia es por renglón (ADR-0003): se calcula qué renglón del Markdown está
+// arriba en el editor, con la fracción recorrida si es un renglón largo que ocupa varias
+// líneas en pantalla, y la vista previa pone arriba ese mismo renglón. Lo traduce el iframe
+// con los `data-sourcepos` de sus bloques (preview-frame.ts). Antes se hacía título por
+// título: en una sección larga sin títulos, editor y vista previa se separaban.
 import { view } from "./editor";
 import { getHeadings, markSection, recentJump, sectionAt } from "./outline";
 
-/// Posición a sincronizar. `index` es el título (-1 = antes del primero) y `fraction` cuánto
-/// se avanzó hacia el siguiente; `end` pide ir al final.
+/// Posición a sincronizar: el renglón del Markdown (desde 0, con fracción) que va arriba; `end`
+/// pide ir al final.
 export interface SyncPosition {
-  index: number;
-  fraction: number;
+  line: number;
   end?: boolean;
-  /** Solo en lo que informa la vista previa: la sección que se lee (para el esquema). */
-  section?: number;
+  /** Solo en lo que informa la vista previa: el renglón que se lee (para el esquema). */
+  reading?: number;
 }
 
-let last: SyncPosition = { index: -1, fraction: 0 };
+let last: SyncPosition = { line: 0 };
 let send: (pos: SyncPosition) => void = () => {};
 let pending = false;
 
 function compute(): SyncPosition {
   const dom = view.scrollDOM;
   if (dom.scrollTop > 0 && dom.scrollTop + dom.clientHeight >= dom.scrollHeight - 2) {
-    return { index: -1, fraction: 1, end: true };
+    return { line: 0, end: true };
   }
-  const doc = view.state.doc;
   const height = Math.max(0, dom.scrollTop - view.documentPadding.top);
   const block = view.lineBlockAtHeight(height);
   const within = block.height > 0 ? (height - block.top) / block.height : 0;
-  const line = doc.lineAt(block.from).number - 1 + Math.min(1, Math.max(0, within));
-
-  const headings = getHeadings();
-  const index = sectionAt(Math.floor(line));
-  const start = index < 0 ? 0 : headings[index].line;
-  const end = index + 1 < headings.length ? headings[index + 1].line : doc.lines;
-  const fraction = end > start ? Math.min(1, Math.max(0, (line - start) / (end - start))) : 0;
-  return { index, fraction };
+  return { line: view.state.doc.lineAt(block.from).number - 1 + Math.min(1, Math.max(0, within)) };
 }
 
 function onScroll(): void {
@@ -75,10 +65,11 @@ function endSection(): number {
   return jumped >= 0 ? jumped : getHeadings().length - 1;
 }
 
-// El esquema resalta la sección que se lee en la vista previa (`section`, con la misma regla
-// que el editor).
+// El esquema resalta la sección que se lee en la vista previa: la del renglón que informa
+// (`reading`, con la misma regla que el editor). El esquema y la vista previa salen del mismo
+// árbol de comrak, así que los renglones coinciden.
 function showSection(pos: SyncPosition): void {
-  markSection(pos.end ? endSection() : (pos.section ?? pos.index));
+  markSection(pos.end ? endSection() : sectionAt(Math.floor(pos.reading ?? pos.line)));
 }
 
 // El editor se ve (vista dividida o solo editor). Con la vista previa sola está oculto y su
@@ -87,9 +78,8 @@ function editorVisible(): boolean {
   return view.scrollDOM.clientHeight > 0;
 }
 
-/// La vista previa se recargó (cada render la vuelve a crear): se le reenvía la posición
-/// para que no salte al principio. Con el editor a la vista se recalcula desde él, porque
-/// los títulos pudieron cambiar desde la última vez (se agregó o borró uno).
+/// La vista previa se recargó (el primer render, o un cambio de tema o zoom): se le reenvía
+/// la posición para que no salte al principio. Con el editor a la vista se recalcula desde él.
 export function resendSync(): void {
   if (editorVisible()) last = compute();
   send(last);
@@ -105,7 +95,9 @@ export function rememberPreviewPosition(pos: SyncPosition): void {
 
 /// Lleva la vista previa al título `index` (el esquema, cuando solo se ve la vista previa).
 export function syncToHeading(index: number): void {
-  last = { index, fraction: 0 };
+  const heading = getHeadings()[index];
+  if (!heading) return;
+  last = { line: heading.line };
   send(last);
 }
 

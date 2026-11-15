@@ -10,7 +10,7 @@
 
 import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { frameMessage } from "./preview-frame";
+import { frameMessage, frameUpdater } from "./preview-frame";
 import type { PreviewPayload } from "./preview";
 import type { SyncPosition } from "./scroll-sync";
 import { LOCALES, setLocale, t } from "./i18n";
@@ -20,6 +20,8 @@ import { getSetting, setSetting } from "./settings";
 const frame = document.querySelector<HTMLIFrameElement>("#frame")!;
 const pin = document.querySelector<HTMLButtonElement>("#pin")!;
 const opacity = document.querySelector<HTMLInputElement>("#opacity")!;
+// El iframe se recrea solo al cambiar el tema o el zoom; el resto, solo cambia lo distinto.
+const frameView = frameUpdater(frame);
 
 // El fondo lo pinta el body de esta página, con opacidad; el documento del iframe tiene que
 // ir sin fondo para que se vea. Va al final del <head>, después de la hoja del tema.
@@ -49,9 +51,12 @@ function applyLabels(): void {
 // La ventana principal emite esto en cada render (y una vez al abrirse esta ventana).
 void listen<PreviewPayload>("preview-html", (event) => {
   const { html, locale } = event.payload;
-  frame.srcdoc = html.includes("</head>")
-    ? html.replace("</head>", `${TRANSPARENT_DOCUMENT}</head>`)
-    : TRANSPARENT_DOCUMENT + html;
+  frameView.show(
+    html.includes("</head>")
+      ? html.replace("</head>", `${TRANSPARENT_DOCUMENT}</head>`)
+      : TRANSPARENT_DOCUMENT + html,
+  );
+  postSync(); // sin recarga no llega "listo": la posición se manda igual
   background = event.payload.background || background;
   paintBackground();
   if ((LOCALES as readonly string[]).includes(locale)) {
@@ -106,7 +111,10 @@ void emit("preview-window-ready");
 window.addEventListener("message", (e) => {
   const msg = frameMessage(e, frame);
   if (!msg) return;
-  if (msg.kind === "ready") postSync();
+  if (msg.kind === "ready") {
+    frameView.markReady();
+    postSync();
+  }
   else if (msg.kind === "scrolled") lastSync = msg.pos; // se restaura si el iframe se recarga
   else void emit("preview-frame", msg);
 });

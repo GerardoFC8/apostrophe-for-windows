@@ -174,8 +174,11 @@ documentos con código.
 - Las fórmulas se ven sin internet.
 - Prepara el instalador de unos 10 MB: con este cambio, pandoc solo hace falta al
   exportar.
-- `data-sourcepos` abre la puerta a un scroll sincronizado por línea y, más adelante, a
-  actualizar solo los bloques que cambian en vez de recrear el iframe.
+- `data-sourcepos` permitió, en un segundo paso, sincronizar el scroll por renglón (antes
+  era título por título) y actualizar solo los bloques que cambian, en vez de recrear el
+  iframe en cada render. El iframe se recrea solo al cambiar el tema o el zoom. Medido en un
+  documento de 110 KB al insertar un párrafo: se conservan 1348 de 1349 nodos y las
+  imágenes, y el scroll no se mueve. Ver `src/preview-frame.ts`.
 
 **Negativas / a vigilar**
 - **La vista previa y el export pueden diferir** en las construcciones de la tabla de

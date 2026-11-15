@@ -73,7 +73,9 @@ de la app para que quien ya la tenía siga recibiendo las actualizaciones.
 **Ver el resultado**
 
 - **Vista previa en vivo** mientras escribes, al instante incluso en documentos largos.
-- **Scroll sincronizado:** la vista previa acompaña al editor, título por título.
+- **Scroll sincronizado:** la vista previa acompaña al editor renglón por renglón, también en
+  secciones largas sin títulos. Al escribir solo cambia lo que editaste: la vista previa no
+  parpadea ni pierde su lugar.
 - **Fórmulas** (`$…$` y `$$…$$`), **código coloreado** y **diagramas Mermaid** (un bloque
   ` ```mermaid `), todo sin conexión a internet.
 - **Alertas** al estilo de GitHub (`> [!NOTE]`, `> [!WARNING]`…) y `==resaltado==`.

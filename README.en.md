@@ -73,7 +73,9 @@ existing users keep getting updates.
 **See the result**
 
 - **Live preview** as you type, instant even for long documents.
-- **Synced scrolling:** the preview follows the editor, heading by heading.
+- **Synced scrolling:** the preview follows the editor line by line, even in long sections
+  without headings. As you type only what you edited changes: the preview doesn't flicker
+  or lose its place.
 - **Formulas** (`$…$` and `$$…$$`), **highlighted code** and **Mermaid diagrams** (a
   ` ```mermaid ` block), all with no internet connection.
 - GitHub-style **alerts** (`> [!NOTE]`, `> [!WARNING]`…) and `==highlight==`.

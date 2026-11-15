@@ -10,7 +10,8 @@
 
 type MermaidApi = typeof import("mermaid").default;
 
-const BLOCK = /<pre[^>]*><code class="language-mermaid"[^>]*>([\s\S]*?)<\/code><\/pre>/g;
+const BLOCK = /<pre([^>]*)><code class="language-mermaid"[^>]*>([\s\S]*?)<\/code><\/pre>/g;
+const SOURCEPOS = /data-sourcepos="[^"]*"/;
 /// Tope de la caché: una entrada por diagrama distinto (código + tema).
 const CACHE_LIMIT = 200;
 
@@ -70,7 +71,13 @@ export async function renderMermaid(html: string, dark: boolean): Promise<string
   }
   // En orden: Mermaid no admite dibujar dos diagramas a la vez.
   const rendered: string[] = [];
-  for (const block of blocks) rendered.push(await renderOne(mermaid, decode(block[1]), theme));
+  for (const block of blocks) rendered.push(await renderOne(mermaid, decode(block[2]), theme));
   let i = 0;
-  return html.replace(BLOCK, () => rendered[i++]);
+  // El diagrama conserva el `data-sourcepos` del bloque: el scroll sincronizado por renglón
+  // lo usa como referencia (preview-frame.ts).
+  return html.replace(BLOCK, (_block, preAttrs: string) => {
+    const out = rendered[i++];
+    const pos = SOURCEPOS.exec(preAttrs)?.[0];
+    return pos ? out.replace(/^<(div|pre) class="/, `<$1 ${pos} class="`) : out;
+  });
 }
